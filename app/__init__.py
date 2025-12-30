@@ -31,9 +31,13 @@ def create_app(config_name='development'):
     # Create API
     api = Api(app, version='1.0', title='Marketplace API')
     
-    # Create tables
+    # Create tables with error handling
     with app.app_context():
-        db.create_all()
+        try:
+            db.create_all()
+        except Exception as e:
+            print(f"Warning: Could not create database tables: {e}")
+            print("This is OK if database is not ready yet.")
     
     # Health check
     @app.route('/health', methods=['GET'])
