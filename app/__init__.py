@@ -38,6 +38,10 @@ def create_app(config_name='development'):
         except Exception as e:
             print(f"Warning: Could not create database tables: {e}")
             print("This is OK if database is not ready yet.")
+
+        # Register routes
+    from app.routes import register_routes
+    register_routes(app)
     
     # Health check
     @app.route('/health', methods=['GET'])
