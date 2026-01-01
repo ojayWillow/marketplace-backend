@@ -24,6 +24,10 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
     user_type = db.Column(db.String(20), default='both', nullable=False)  # 'seller', 'buyer', 'helper', 'both'
+        profile_picture_url = db.Column(db.String(500), nullable=True)
+    phone_verified = db.Column(db.Boolean, default=False, nullable=False)
+    reputation_score = db.Column(db.Float, default=0.0, nullable=False)  # Average rating
+    completion_rate = db.Column(db.Float, default=0.0, nullable=False)  # Percentage of completed tasks
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
@@ -56,6 +60,10 @@ class User(db.Model):
             'is_active': self.is_active,
             'is_verified': self.is_verified,
             'user_type': self.user_type,
+                        'profile_picture_url': self.profile_picture_url,
+                        'phone_verified': self.phone_verified,
+                        'reputation_score': self.reputation_score,
+                        'completion_rate': self.completion_rate,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
