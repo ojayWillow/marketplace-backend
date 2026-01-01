@@ -44,7 +44,7 @@ class TaskRequest(db.Model):
             'currency': self.currency,
             'location': self.location,
             'latitude': self.latitude,
-            'longitude': self.longitude
+            'longitude': self.longitude,
             'creator_id': self.creator_id,
             'radius': self.radius,
             'required_skills': self.required_skills,
