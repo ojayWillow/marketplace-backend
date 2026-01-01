@@ -26,8 +26,8 @@ class User(db.Model):
     user_type = db.Column(db.String(20), default='both', nullable=False)  # 'seller', 'buyer', 'helper', 'both'
     profile_picture_url = db.Column(db.String(500), nullable=True)
     phone_verified = db.Column(db.Boolean, default=False, nullable=False)
-        reputation_score = db.Column(db.Float, default=0.0, nullable=False) # Average rating
-        completion_rate = db.Column(db.Float, default=0.0, nullable=False) # Percentage of completed tasks
+    reputation_score = db.Column(db.Float, default=0.0, nullable=False) # Average rating
+    completion_rate = db.Column(db.Float, default=0.0, nullable=False) # Percentage of completed tasks
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
