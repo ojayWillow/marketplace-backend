@@ -30,6 +30,9 @@ def create_app(config_name='development'):
         from app.routes import register_routes
         register_routes(app)
     except Exception as e:
-        print(f"Warning: Could not register routes - {e}")
+        print(f"ERROR registering routes: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+
     
     return app
