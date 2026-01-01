@@ -119,4 +119,26 @@ Invoke-WebRequest http://localhost:5000/health
 
 ---
 
+---
+
+## ✍️ STEP 6: Test User Registration (NEW - Do This Next)
+
+Keep Flask running in the first terminal.
+
+In the second terminal where you tested health, run this:
+
+```bash
+Invoke-WebRequest -Uri http://localhost:5000/api/auth/register -Method POST -ContentType "application/json" -Body '{"username":"testuser","email":"test@example.com","password":"testpass123","first_name":"Test","last_name":"User"}' -UseBasicParsing
+```
+
+You should see a response with status 201 and a user object.
+
+✅ **When you see status 201 and user data, reply: "USER REGISTRATION WORKS"**
+
+If you get an error, tell me what the error says.
+
+---
+
+**Great progress! The backend is alive and responding! 🚀**
+
 **Remember: ONE STEP AT A TIME. Reply when each step is done.**
