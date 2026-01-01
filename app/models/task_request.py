@@ -31,10 +31,11 @@ class TaskRequest(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
-
-        # Relationships
-        creator = db.relationship('User', foreign_keys=[creator_id], backref='created_tasks')
+    
+    # Relationships
+    creator = db.relationship('User', foreign_keys=[creator_id], backref='created_tasks')
     assigned_to = db.relationship('User', foreign_keys=[assigned_to_id], backref='assigned_tasks')
+
     
     def to_dict(self):
         """Convert task request to dictionary."""
