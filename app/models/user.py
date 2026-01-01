@@ -34,7 +34,7 @@ class User(db.Model):
     # Relationships
     listings = db.relationship('Listing', backref='seller', lazy=True, foreign_keys='Listing.seller_id')
     task_requests = db.relationship('TaskRequest', backref='creator', lazy=True, foreign_keys='TaskRequest.creator_id')
-    gned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy=True, foreign_keys='TaskRequest.assigned_to_id')
+    assigned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy=True, foreign_keys='TaskRequest.assigned_to_id')
     def set_password(self, password):
         """Hash and set the user password."""
         self.password_hash = generate_password_hash(password)
