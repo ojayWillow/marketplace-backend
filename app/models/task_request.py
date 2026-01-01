@@ -32,10 +32,6 @@ class TaskRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
-    # Relationships
-    creator = db.relationship('User', foreign_keys=[creator_id], backref='created_tasks')
-    assigned_to = db.relationship('User', foreign_keys=[assigned_to_id], backref='assigned_tasks')
-
     
     def to_dict(self):
         """Convert task request to dictionary."""
@@ -48,11 +44,8 @@ class TaskRequest(db.Model):
             'currency': self.currency,
             'location': self.location,
             'latitude': self.latitude,
-            'longitude': self.longitude,
+            'longitude': self.longitude
             'creator_id': self.creator_id,
-            'creator': self.creator.username if self.creator else None,
-            'assigned_to_id': self.assigned_to_id,
-            'assigned_to': self.assigned_to.username if self.assigned_to else None,
             'radius': self.radius,
             'required_skills': self.required_skills,
             'images': self.images,
