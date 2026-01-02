@@ -4,7 +4,6 @@ from app import create_app
 from app import db
 from app.models import User, Listing, TaskRequest, TaskResponse, Review
 
-
 @pytest.fixture(scope="session")
 def test_app():
     os.environ["FLASK_ENV"] = "testing"
@@ -20,24 +19,25 @@ def test_app():
 def client(test_app):
     return test_app.test_client()
 
-def register_user(client, email="test@example.com", password="password123"):
+def register_user(client, email="test@example.com", password="password123", username="testuser"):
     response = client.post("/api/auth/register", json={
+        "username": username,
         "email": email,
-        "password": password,
-        "name": "Test User"
+        "password": password
     })
+    if response.status_code not in (200, 201):
+        print(f"Registration failed: {response.status_code} - {response.get_json()}")
     assert response.status_code in (200, 201)
     return response.get_json()
 
 def login_user(client, email="test@example.com", password="password123"):
     response = client.post("/api/auth/login", json={
         "email": email,
-        "password": password,
-        "name": "Test User"
+        "password": password
     })
     assert response.status_code == 200
     data = response.get_json()
-    return data["access_token"]
+    return data["token"]
 
 def auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
@@ -49,7 +49,7 @@ def test_health_check(client):
     assert data.get("status") == "ok"
 
 def test_auth_register_and_login_flow(client):
-    register_user(client, "user1@example.com")
+    register_user(client, "user1@example.com", "password123", "user1")
     token = login_user(client, "user1@example.com")
     headers = auth_headers(token)
 
@@ -59,7 +59,7 @@ def test_auth_register_and_login_flow(client):
     assert profile_data.get("email") == "user1@example.com"
 
 def test_create_and_get_listing(client):
-    register_user(client, "listing_owner@example.com")
+    register_user(client, "listing_owner@example.com", "password123", "listingowner")
     token = login_user(client, "listing_owner@example.com")
     headers = auth_headers(token)
 
@@ -79,11 +79,11 @@ def test_create_and_get_listing(client):
     assert data["title"] == "Test Listing"
 
 def test_create_task_request_and_response_flow(client):
-    register_user(client, "creator@example.com")
+    register_user(client, "creator@example.com", "password123", "creator")
     creator_token = login_user(client, "creator@example.com")
     creator_headers = auth_headers(creator_token)
 
-    register_user(client, "helper@example.com")
+    register_user(client, "helper@example.com", "password123", "helper")
     helper_token = login_user(client, "helper@example.com")
     helper_headers = auth_headers(helper_token)
 
@@ -115,11 +115,11 @@ def test_create_task_request_and_response_flow(client):
     assert updated["status"] == "accepted"
 
 def test_create_review_flow(client):
-    register_user(client, "reviewer@example.com")
+    register_user(client, "reviewer@example.com", "password123", "reviewer")
     reviewer_token = login_user(client, "reviewer@example.com")
     reviewer_headers = auth_headers(reviewer_token)
 
-    register_user(client, "reviewed@example.com")
+    register_user(client, "reviewed@example.com", "password123", "reviewed")
     reviewed_token = login_user(client, "reviewed@example.com")
 
     resp = client.post("/api/reviews", json={
