@@ -66,7 +66,7 @@ def test_listing(client, auth_tokens, db_session):
         description='Test description',
         price=100.00,
         category='Electronics',
-        seller_id=auth_tokens['seller_id'],
+        seller_id=auth_tokens['user_id'],
         location='Test City'
     )
     db_session.add(listing)
