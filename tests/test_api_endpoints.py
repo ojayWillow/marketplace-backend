@@ -112,8 +112,8 @@ class TestAPIEndpoints:
         # Get reviews for product
         response = client.get(f'/api/reviews?listing_id={product_id}')
         assert response.status_code == 200
-        data = response.get_json()        assert isinstance(data, list)
-
+        data = response.get_json()
+        assert isinstance(data, list)
     def test_unauthorized_access(self, client):
         """Test that protected endpoints require authentication."""
         # Try to create listing without auth
