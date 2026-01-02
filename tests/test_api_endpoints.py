@@ -96,8 +96,7 @@ class TestAPIEndpoints:
         # Create review
         review_data = {
             'reviewed_user_id': auth_tokens['user_id'],
-            'listing_id': product_id,
-            'rating': 5,
+            'comment': 'Flow test review'            'rating': 5,
             'content': 'Flow test review'
         }
         
