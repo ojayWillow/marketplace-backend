@@ -4,9 +4,31 @@ from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Listing, User
 from datetime import datetime
+import os
+import jwt
+from functools import wraps
 
 listings_bp = Blueprint('listings', __name__)
+SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
 
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'error': 'Token is missing'}), 401
+        
+        try:
+            token = token.split(' ')[1]
+            data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            current_user_id = data['user_id']
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except Exception as e:
+            return jsonify({'error': 'Token is invalid'}), 401
+        
+        return f(current_user_id, *args, **kwargs)
+    return decorated
 
 @listings_bp.route('', methods=['GET'])
 def get_listings():
@@ -33,7 +55,6 @@ def get_listings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @listings_bp.route('/<int:listing_id>', methods=['GET'])
 def get_listing(listing_id):
     """Get a specific listing by ID."""
@@ -49,14 +70,14 @@ def get_listing(listing_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @listings_bp.route('', methods=['POST'])
-def create_listing():
+@token_required
+def create_listing(current_user_id):
     """Create a new listing."""
     try:
         data = request.get_json()
         
-        if not all(k in data for k in ['title', 'description', 'category', 'price', 'seller_id']):
+        if not all(k in data for k in ['title', 'description', 'category', 'price']):
             return jsonify({'error': 'Missing required fields'}), 400
         
         listing = Listing(
@@ -65,7 +86,7 @@ def create_listing():
             category=data['category'],
             subcategory=data.get('subcategory'),
             price=data['price'],
-            seller_id=data['seller_id'],
+            seller_id=current_user_id,
             location=data.get('location'),
             latitude=data.get('latitude'),
             longitude=data.get('longitude')
@@ -82,9 +103,9 @@ def create_listing():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-
 @listings_bp.route('/<int:listing_id>', methods=['PUT'])
-def update_listing(listing_id):
+@token_required
+def update_listing(current_user_id, listing_id):
     """Update an existing listing."""
     try:
         listing = Listing.query.get(listing_id)
@@ -108,9 +129,9 @@ def update_listing(listing_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-
 @listings_bp.route('/<int:listing_id>', methods=['DELETE'])
-def delete_listing(listing_id):
+@token_required
+def delete_listing(current_user_id, listing_id):
     """Delete a listing."""
     try:
         listing = Listing.query.get(listing_id)
