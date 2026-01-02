@@ -100,6 +100,7 @@ class TestAPIEndpoints:
             'listing_id': product_id,
             'rating': 5,
             'comment': 'Flow test review'        
+                }
         response = client.post(
             '/api/reviews',
             json=review_data,
