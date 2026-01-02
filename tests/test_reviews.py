@@ -14,7 +14,7 @@ class TestReviewsEndpoints:
             'reviewed_user_id': auth_tokens['user_id'],
             'listing_id': listing_id,
             'rating': 5,
-            'content': 'Excellent product!'
+            'comment': 'Excellent product!'
         }
 
         response = client.post(
@@ -52,7 +52,7 @@ class TestReviewsEndpoints:
             'reviewed_user_id': auth_tokens['user_id'],
             'listing_id': listing_id,
             'rating': 6,
-            'content': 'Test comment'
+            'comment': 'Test comment'
         }
 
         response = client.post(
@@ -71,7 +71,7 @@ class TestReviewsEndpoints:
             'reviewed_user_id': auth_tokens['user_id'],
             'listing_id': listing_id,
             'rating': 5,
-            'content': 'Test review'
+            'comment': 'Test review'
         }
         
         client.post(
@@ -81,7 +81,7 @@ class TestReviewsEndpoints:
         )
 
         reviewer_id = auth_tokens['user_id']
-        response = client.get(f'/api/reviews/{reviewer_id}')
+        response = client.get(f'/api/reviews?reviewer_id={reviewer_id}')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -89,12 +89,12 @@ class TestReviewsEndpoints:
 
     def test_get_reviews_nonexistent_reviewer(self, client):
         """Test getting reviews for non-existent reviewer."""
-        response = client.get('/api/reviews/99999')
+        response = client.get('/api/reviews?reviewer_id=99999')
 
-        assert response.status_code in (200, 404)
-        if response.status_code == 200:
-            data = response.get_json()
-            assert isinstance(data, list)
+        assert response.status_code == 200
+        data = response.get_json()
+        assert isinstance(data, list)
+        assert len(data) == 0
 
     def test_update_review_success(self, client, auth_tokens, test_listing, db_session):
         """Test successful review update."""
@@ -103,7 +103,7 @@ class TestReviewsEndpoints:
             'reviewed_user_id': auth_tokens['user_id'],
             'listing_id': listing_id,
             'rating': 4,
-            'content': 'Good product'
+            'comment': 'Good product'
         }
         
         create_response = client.post(
@@ -116,7 +116,7 @@ class TestReviewsEndpoints:
 
         update_data = {
             'rating': 5,
-            'content': 'Updated: Excellent product!'
+            'comment': 'Updated: Excellent product!'
         }
 
         response = client.put(
@@ -127,7 +127,7 @@ class TestReviewsEndpoints:
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data['message'] == 'Review updated successfully'
+        assert data['message'] == 'Review updated'
 
     def test_delete_review_success(self, client, auth_tokens, test_listing, db_session):
         """Test successful review deletion."""
@@ -136,7 +136,7 @@ class TestReviewsEndpoints:
             'reviewed_user_id': auth_tokens['user_id'],
             'listing_id': listing_id,
             'rating': 3,
-            'content': 'Average product'
+            'comment': 'Average product'
         }
         
         create_response = client.post(
@@ -154,7 +154,7 @@ class TestReviewsEndpoints:
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data['message'] == 'Review deleted successfully'
+        assert data['message'] == 'Review deleted'
 
     def test_delete_nonexistent_review(self, client, auth_tokens):
         """Test deleting non-existent review."""
