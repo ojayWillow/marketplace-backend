@@ -121,7 +121,8 @@ def update_review(current_user_id, review_id):
             review.rating = data['rating']
         
         if 'comment' in data:
-                        review.content = data['comment']  review.updated_at = datetime.utcnow()
+                        review.content = data['comment'] 
+                        review.updated_at = datetime.utcnow()
         db.session.commit()
         
         return jsonify({'message': 'Review updated', 'review': review.to_dict()}), 200
