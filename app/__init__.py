@@ -17,7 +17,7 @@ def create_app(config_name='development'):
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['TESTING'] = True
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-                app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///marketplace.db'
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///marketplace.db'
     
     # Initialize extensions
     db.init_app(app)
