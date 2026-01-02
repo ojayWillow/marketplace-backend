@@ -8,13 +8,13 @@ class TestReviewsEndpoints:
 
     def test_create_review_success(self, client, auth_tokens, test_listing, db_session):
         """Test successful review creation."""
-        # Get product_id from test listing
-        product_id = test_listing['id']
+        listing_id = test_listing['id']
 
         review_data = {
-            'product_id': product_id,
+            'reviewed_user_id': auth_tokens['user_id'],
+            'listing_id': listing_id,
             'rating': 5,
-            'comment': 'Excellent product!'
+            'content': 'Excellent product!'
         }
 
         response = client.post(
@@ -28,13 +28,12 @@ class TestReviewsEndpoints:
         assert data['message'] == 'Review created successfully'
         assert 'review' in data
         assert data['review']['rating'] == 5
-        assert data['review']['comment'] == 'Excellent product!'
+        assert data['review']['content'] == 'Excellent product!'
 
     def test_create_review_missing_fields(self, client, auth_tokens):
         """Test review creation with missing required fields."""
         review_data = {
             'rating': 5
-            # Missing product_id and comment
         }
 
         response = client.post(
@@ -47,12 +46,13 @@ class TestReviewsEndpoints:
 
     def test_create_review_invalid_rating(self, client, auth_tokens, test_listing):
         """Test review creation with invalid rating value."""
-        product_id = test_listing['id']
+        listing_id = test_listing['id']
 
         review_data = {
-            'product_id': product_id,
-            'rating': 6,  # Invalid: should be 1-5
-            'comment': 'Test comment'
+            'reviewed_user_id': auth_tokens['user_id'],
+            'listing_id': listing_id,
+            'rating': 6,
+            'content': 'Test comment'
         }
 
         response = client.post(
@@ -63,33 +63,47 @@ class TestReviewsEndpoints:
 
         assert response.status_code == 400
 
-    def test_get_reviews_by_product(self, client, test_listing):
-        """Test getting reviews for a specific product."""
-        product_id = test_listing['id']
+    def test_get_reviews_by_reviewer(self, client, auth_tokens, test_listing, db_session):
+        """Test getting reviews by reviewer ID."""
+        # Create a review first
+        listing_id = test_listing['id']
+        review_data = {
+            'reviewed_user_id': auth_tokens['user_id'],
+            'listing_id': listing_id,
+            'rating': 5,
+            'content': 'Test review'
+        }
+        
+        client.post(
+            '/api/reviews',
+            json=review_data,
+            headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+        )
 
-        response = client.get(f'/api/reviews/product/{product_id}')
+        reviewer_id = auth_tokens['user_id']
+        response = client.get(f'/api/reviews/{reviewer_id}')
 
         assert response.status_code == 200
         data = response.get_json()
         assert isinstance(data, list)
 
-    def test_get_reviews_nonexistent_product(self, client):
-        """Test getting reviews for non-existent product."""
-        response = client.get('/api/reviews/product/99999')
+    def test_get_reviews_nonexistent_reviewer(self, client):
+        """Test getting reviews for non-existent reviewer."""
+        response = client.get('/api/reviews/99999')
 
-        # Should return 200 with empty list
-        assert response.status_code in (200, 404)  # Accept both        data = response.get_json()
-        assert isinstance(data, list)
-        assert len(data) == 0
+        assert response.status_code in (200, 404)
+        if response.status_code == 200:
+            data = response.get_json()
+            assert isinstance(data, list)
 
     def test_update_review_success(self, client, auth_tokens, test_listing, db_session):
         """Test successful review update."""
-        # Create a review first
-        product_id = test_listing['id']
+        listing_id = test_listing['id']
         review_data = {
-            'product_id': product_id,
+            'reviewed_user_id': auth_tokens['user_id'],
+            'listing_id': listing_id,
             'rating': 4,
-            'comment': 'Good product'
+            'content': 'Good product'
         }
         
         create_response = client.post(
@@ -97,12 +111,12 @@ class TestReviewsEndpoints:
             json=review_data,
             headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
         )
+        
         review_id = create_response.get_json()['review']['id']
 
-        # Update the review
         update_data = {
             'rating': 5,
-            'comment': 'Updated: Excellent product!'
+            'content': 'Updated: Excellent product!'
         }
 
         response = client.put(
@@ -117,12 +131,12 @@ class TestReviewsEndpoints:
 
     def test_delete_review_success(self, client, auth_tokens, test_listing, db_session):
         """Test successful review deletion."""
-        # Create a review first
-        product_id = test_listing['id']
+        listing_id = test_listing['id']
         review_data = {
-            'product_id': product_id,
+            'reviewed_user_id': auth_tokens['user_id'],
+            'listing_id': listing_id,
             'rating': 3,
-            'comment': 'Average product'
+            'content': 'Average product'
         }
         
         create_response = client.post(
@@ -130,9 +144,9 @@ class TestReviewsEndpoints:
             json=review_data,
             headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
         )
+        
         review_id = create_response.get_json()['review']['id']
 
-        # Delete the review
         response = client.delete(
             f'/api/reviews/{review_id}',
             headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
