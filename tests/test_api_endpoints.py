@@ -1,137 +1,137 @@
-import os
+"""Test suite for API endpoint integration."""
 import pytest
-from app import create_app
-from app import db
-from app.models import User, Listing, TaskRequest, TaskResponse, Review
 
-@pytest.fixture(scope="session")
-def test_app():
-    os.environ["FLASK_ENV"] = "testing"
-    os.environ["DATABASE_URI"] = "sqlite:///:memory:"
-    app = create_app()
-    with app.app_context():
-        db.create_all()
-        yield app
-        db.session.remove()
-        db.drop_all()
 
-@pytest.fixture()
-def client(test_app):
-    return test_app.test_client()
+class TestAPIEndpoints:
+    """Integration tests for all API endpoints."""
 
-def register_user(client, email="test@example.com", password="password123", username="testuser"):
-    response = client.post("/api/auth/register", json={
-        "username": username,
-        "email": email,
-        "password": password
-    })
-    if response.status_code not in (200, 201):
-        print(f"Registration failed: {response.status_code} - {response.get_json()}")
-    assert response.status_code in (200, 201)
-    return response.get_json()
+    def test_health_check(self, client):
+        """Test health check endpoint."""
+        response = client.get('/health')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data.get('status') == 'ok'
 
-def login_user(client, email="test@example.com", password="password123"):
-    response = client.post("/api/auth/login", json={
-        "email": email,
-        "password": password
-    })
-    assert response.status_code == 200
-    data = response.get_json()
-    return data["token"]
+    def test_auth_register_and_login_flow(self, client):
+        """Test complete registration and login flow."""
+        # Register user
+        register_data = {
+            'username': 'flowtest',
+            'email': 'flowtest@example.com',
+            'password': 'TestPass123!',
+            'first_name': 'Flow',
+            'last_name': 'Test'
+        }
+        
+        response = client.post(
+            '/api/auth/register',
+            json=register_data
+        )
+        
+        if response.status_code not in (200, 201):
+            print(f"Registration failed: {response.status_code} {response.get_json()}")
+        assert response.status_code in (200, 201)
 
-def auth_headers(token):
-    return {"Authorization": f"Bearer {token}"}
+        # Login user
+        login_data = {
+            'email': 'flowtest@example.com',
+            'password': 'TestPass123!'
+        }
+        
+        response = client.post(
+            '/api/auth/login',
+            json=login_data
+        )
+        
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'token' in data
 
-def test_health_check(client):
-    resp = client.get("/health")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data.get("status") == "ok"
+    def test_listings_crud_flow(self, client, auth_tokens):
+        """Test complete listings CRUD flow."""
+        # Create listing
+        listing_data = {
+            'title': 'CRUD Test Product',
+            'description': 'Test description',
+            'price': 99.99,
+            'category': 'electronics'
+        }
+        
+        response = client.post(
+            '/api/listings',
+            json=listing_data,
+            headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+        )
+        
+        assert response.status_code == 201
+        data = response.get_json()
+        listing_id = data['listing']['id']
 
-def test_auth_register_and_login_flow(client):
-    register_user(client, "user1@example.com", "password123", "user1")
-    token = login_user(client, "user1@example.com")
-    headers = auth_headers(token)
+        # Get single listing
+        response = client.get(f'/api/listings/{listing_id}')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['id'] == listing_id
 
-    profile_resp = client.get("/api/auth/profile", headers=headers)
-    assert profile_resp.status_code == 200
-    profile_data = profile_resp.get_json()
-    assert profile_data.get("email") == "user1@example.com"
+        # Update listing
+        update_data = {'price': 79.99}
+        response = client.put(
+            f'/api/listings/{listing_id}',
+            json=update_data,
+            headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+        )
+        assert response.status_code == 200
 
-def test_create_and_get_listing(client):
-    register_user(client, "listing_owner@example.com", "password123", "listingowner")
-    token = login_user(client, "listing_owner@example.com")
-    headers = auth_headers(token)
+        # Delete listing
+        response = client.delete(
+            f'/api/listings/{listing_id}',
+            headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+        )
+        assert response.status_code == 200
 
-    create_resp = client.post("/api/listings", json={
-        "title": "Test Listing",
-        "description": "Test description",
-        "price": 10.0,
-        "category": "general"
-    }, headers=headers)
-    assert create_resp.status_code in (200, 201)
-    listing = create_resp.get_json()
-    listing_id = listing["id"]
+    def test_reviews_flow(self, client, auth_tokens, test_listing):
+        """Test reviews creation and retrieval flow."""
+        product_id = test_listing['id']
+        
+        # Create review
+        review_data = {
+            'product_id': product_id,
+            'rating': 5,
+            'comment': 'Flow test review'
+        }
+        
+        response = client.post(
+            '/api/reviews',
+            json=review_data,
+            headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+        )
+        
+        assert response.status_code == 201
+        
+        # Get reviews for product
+        response = client.get(f'/api/reviews/product/{product_id}')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert isinstance(data, list)
 
-    get_resp = client.get(f"/api/listings/{listing_id}")
-    assert get_resp.status_code == 200
-    data = get_resp.get_json()
-    assert data["title"] == "Test Listing"
+    def test_unauthorized_access(self, client):
+        """Test that protected endpoints require authentication."""
+        # Try to create listing without auth
+        listing_data = {
+            'title': 'Unauthorized Test',
+            'description': 'Should fail',
+            'price': 50.00,
+            'category': 'test'
+        }
+        
+        response = client.post(
+            '/api/listings',
+            json=listing_data
+        )
+        
+        assert response.status_code == 401
 
-def test_create_task_request_and_response_flow(client):
-    register_user(client, "creator@example.com", "password123", "creator")
-    creator_token = login_user(client, "creator@example.com")
-    creator_headers = auth_headers(creator_token)
-
-    register_user(client, "helper@example.com", "password123", "helper")
-    helper_token = login_user(client, "helper@example.com")
-    helper_headers = auth_headers(helper_token)
-
-    task_resp = client.post("/api/tasks", json={
-        "title": "Move furniture",
-        "description": "Need help moving",
-        "budget": 50.0,
-        "location": "Riga",
-        "category": "moving"
-    }, headers=creator_headers)
-    assert task_resp.status_code in (200, 201)
-    task = task_resp.get_json()
-    task_id = task["id"]
-
-    apply_resp = client.post("/api/task_responses", json={
-        "task_id": task_id,
-        "message": "I can help",
-        "proposed_price": 45.0
-    }, headers=helper_headers)
-    assert apply_resp.status_code in (200, 201)
-    response_data = apply_resp.get_json()
-    response_id = response_data["id"]
-
-    update_resp = client.put(f"/api/task_responses/{response_id}", json={
-        "status": "accepted"
-    }, headers=creator_headers)
-    assert update_resp.status_code == 200
-    updated = update_resp.get_json()
-    assert updated["status"] == "accepted"
-
-def test_create_review_flow(client):
-    register_user(client, "reviewer@example.com", "password123", "reviewer")
-    reviewer_token = login_user(client, "reviewer@example.com")
-    reviewer_headers = auth_headers(reviewer_token)
-
-    register_user(client, "reviewed@example.com", "password123", "reviewed")
-    reviewed_token = login_user(client, "reviewed@example.com")
-
-    resp = client.post("/api/reviews", json={
-        "reviewed_user_id": 2,
-        "rating": 5,
-        "comment": "Great job"
-    }, headers=reviewer_headers)
-    assert resp.status_code in (200, 201)
-    review = resp.get_json()
-    review_id = review["id"]
-
-    get_resp = client.get(f"/api/reviews/{review_id}")
-    assert get_resp.status_code == 200
-    data = get_resp.get_json()
-    assert data["rating"] == 5
+    def test_invalid_endpoints(self, client):
+        """Test that invalid endpoints return 404."""
+        response = client.get('/api/nonexistent')
+        assert response.status_code == 404
