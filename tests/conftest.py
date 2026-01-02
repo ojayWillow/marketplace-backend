@@ -80,25 +80,26 @@ def test_listing(client, auth_tokens, db_session):
 
 
 @pytest.fixture(scope='function')
+@pytest.fixture(scope='function')
 def create_test_review(client, auth_tokens, test_listing, db_session):
-    """Create a test review."""
+    """Create a test review directly in database."""
     from app.models import Review
     
-    review_data = {
-        'product_id': test_listing['id'],
-        'rating': 5,
-        'comment': 'Great product!'
-    }
-    
-    response = client.post(
-        '/api/reviews',
-        json=review_data,
-        headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+    review = Review(
+        reviewer_id=auth_tokens['user_id'],
+        reviewed_user_id=auth_tokens['user_id'],
+        listing_id=test_listing['id'],
+        rating=5,
+        content='Great product!'
     )
+    db_session.add(review)
+    db_session.commit()
     
-    data = response.get_json()
-    if data:
-        return data.get('review', {})
+    return {
+        'id': review.id,
+        'rating': review.rating,
+        'content': review.content
+    }
     return {}
 
 
