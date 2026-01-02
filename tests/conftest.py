@@ -80,7 +80,6 @@ def test_listing(client, auth_tokens, db_session):
 
 
 @pytest.fixture(scope='function')
-@pytest.fixture(scope='function')
 def create_test_review(client, auth_tokens, test_listing, db_session):
     """Create a test review directly in database."""
     from app.models import Review
