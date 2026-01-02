@@ -13,11 +13,11 @@ def create_app(config_name='development'):
     
     # Configuration
     if config_name == 'development':
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///marketplace.db'
     elif config_name == 'testing':
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['TESTING'] = True
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///marketplace.db'
     
     # Initialize extensions
     db.init_app(app)
@@ -37,6 +37,5 @@ def create_app(config_name='development'):
         print(f"ERROR registering routes: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
-
     
     return app
