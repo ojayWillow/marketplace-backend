@@ -34,6 +34,9 @@ def db_session(app):
 def auth_tokens(client, db_session):
     """Create a test user and return auth tokens."""
     from app.models import User
+    import jwt
+    import os
+    from datetime import datetime, timedelta
     
     # Create test user
     test_user = User(
@@ -46,13 +49,20 @@ def auth_tokens(client, db_session):
     db_session.add(test_user)
     db_session.commit()
     
-    # Return mock tokens with user_id
-    # In a real app, you would call the login endpoint
-    # For testing without auth routes, we return a mock structure
+    # Generate real JWT token
+    SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+    payload = {
+        'user_id': test_user.id,
+        'username': test_user.username,
+        'exp': datetime.utcnow() + timedelta(hours=24)
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+    
     return {
         'user_id': test_user.id,
-        'access_token': 'mock_access_token',
-        'refresh_token': 'mock_refresh_token'
+        'access_token': token,
+        'refresh_token': token  # Using same token for simplicity in tests
+    }        'refresh_token': 'mock_refresh_token'
     }
 
 
