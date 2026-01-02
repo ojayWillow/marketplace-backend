@@ -1,12 +1,15 @@
 """Review routes for ratings and feedback."""
+
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Review, User, Listing, TaskRequest
 from functools import wraps
 import jwt
+import os
 from datetime import datetime
 
 reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
+SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
 
 # JWT token verification
 def token_required(f):
@@ -15,12 +18,16 @@ def token_required(f):
         token = request.headers.get('Authorization')
         if not token:
             return jsonify({'error': 'Token is missing'}), 401
+        
         try:
             token = token.split(' ')[1]
-            data = jwt.decode(token, 'your-secret-key-change-in-production', algorithms=['HS256'])
+            data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
             current_user_id = data['user_id']
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
         except Exception as e:
             return jsonify({'error': 'Token is invalid'}), 401
+        
         return f(current_user_id, *args, **kwargs)
     return decorated
 
@@ -60,7 +67,7 @@ def create_review(current_user_id):
     try:
         data = request.get_json()
         
-        if not data or not all(k in data for k in ['rating', 'content', 'reviewed_user_id']):
+        if not data or not all(k in data for k in ['rating', 'reviewed_user_id']):
             return jsonify({'error': 'Missing required fields'}), 400
         
         if not (1 <= data['rating'] <= 5):
@@ -70,7 +77,7 @@ def create_review(current_user_id):
             reviewer_id=current_user_id,
             reviewed_user_id=data['reviewed_user_id'],
             rating=data['rating'],
-            content=data['content'],
+            comment=data.get('comment'),
             listing_id=data.get('listing_id'),
             task_id=data.get('task_id')
         )
@@ -90,6 +97,7 @@ def get_review(review_id):
         review = Review.query.get(review_id)
         if not review:
             return jsonify({'error': 'Review not found'}), 404
+        
         return jsonify(review.to_dict()), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -113,8 +121,8 @@ def update_review(current_user_id, review_id):
                 return jsonify({'error': 'Rating must be between 1 and 5'}), 400
             review.rating = data['rating']
         
-        if 'content' in data:
-            review.content = data['content']
+        if 'comment' in data:
+            review.comment = data['comment']
         
         review.updated_at = datetime.utcnow()
         db.session.commit()
