@@ -69,22 +69,14 @@ def test_listing(client, auth_tokens, db_session):
     """Create a test listing/product."""
     from app.models import Listing
     
-    listing = Listing(
-        title='Test Product',
-        description='Test description',
-        price=100.00,
-        category='Electronics',
-        seller_id=auth_tokens['user_id'],
-        location='Test City'
-    )
-    db_session.add(listing)
-    db_session.commit()
-    
+    # Return dict for POST requests (not database object)
     return {
-        'id': listing.id,
-        'title': listing.title,
-        'price': listing.price
-    }
+        'title': 'Test Product',
+        'description': 'Test description',
+        'price': 100.00,
+        'category': 'Electronics',
+        'location': 'Test City'
+    }    }
 
 
 @pytest.fixture(scope='function')
