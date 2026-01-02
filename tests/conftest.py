@@ -6,7 +6,7 @@ from app import create_app, db
 def app():
     """Create application for testing."""
     app = create_app('testing')
-    
+
     with app.app_context():
         db.create_all()
         yield app
@@ -23,12 +23,10 @@ def runner(app):
     """Test CLI runner."""
     return app.test_cli_runner()
 
-
 @pytest.fixture(scope='function')
 def db_session(app):
     """Database session for tests."""
     return db.session
-
 
 @pytest.fixture(scope='function')
 def auth_tokens(client, db_session):
@@ -37,7 +35,7 @@ def auth_tokens(client, db_session):
     import jwt
     import os
     from datetime import datetime, timedelta
-    
+
     # Create test user
     test_user = User(
         username='testuser',
@@ -48,7 +46,7 @@ def auth_tokens(client, db_session):
     test_user.set_password('TestPass123!')
     db_session.add(test_user)
     db_session.commit()
-    
+
     # Generate real JWT token
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
     payload = {
@@ -57,7 +55,7 @@ def auth_tokens(client, db_session):
         'exp': datetime.utcnow() + timedelta(hours=24)
     }
     token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
-    
+
     return {
         'user_id': test_user.id,
         'access_token': token,
@@ -66,23 +64,36 @@ def auth_tokens(client, db_session):
 
 @pytest.fixture(scope='function')
 def test_listing(client, auth_tokens, db_session):
-    """Create a test listing/product."""
+    """Create a test listing/product and return complete dict with ID."""
     from app.models import Listing
-    
-    # Return dict for POST requests (not database object)
-    return {
+
+    # Create listing via API to get real ID
+    listing_data = {
         'title': 'Test Product',
         'description': 'Test description',
         'price': 100.00,
         'category': 'Electronics',
         'location': 'Test City'
     }
+    
+    response = client.post(
+        '/api/listings',
+        json=listing_data,
+        headers={'Authorization': f"Bearer {auth_tokens['access_token']}"}
+    )
+    
+    if response.status_code == 201:
+        response_data = response.get_json()
+        return response_data['listing']  # Return complete listing with ID
+    
+    # Fallback: return dict without ID
+    return listing_data
 
 @pytest.fixture(scope='function')
 def create_test_review(client, auth_tokens, test_listing, db_session):
     """Create a test review directly in database."""
     from app.models import Review
-    
+
     review = Review(
         reviewer_id=auth_tokens['user_id'],
         reviewed_user_id=auth_tokens['user_id'],
@@ -92,20 +103,18 @@ def create_test_review(client, auth_tokens, test_listing, db_session):
     )
     db_session.add(review)
     db_session.commit()
-    
+
     return {
         'id': review.id,
         'rating': review.rating,
         'content': review.content
     }
-    return {}
-
 
 @pytest.fixture(scope='function')
 def create_second_user(client, db_session):
     """Create a second test user for authorization testing."""
     from app.models import User
-    
+
     second_user = User(
         username='seconduser',
         email='second@example.com',
@@ -115,7 +124,7 @@ def create_second_user(client, db_session):
     second_user.set_password('SecondPass123!')
     db_session.add(second_user)
     db_session.commit()
-    
+
     # Return mock token
     return {
         'user_id': second_user.id,
