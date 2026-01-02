@@ -110,8 +110,8 @@ class TestAPIEndpoints:
         assert response.status_code == 201
         
         # Get reviews for product
-        response = client.get(f'/api/reviews?listing_id={product_id}')        assert response.status_code == 200
-        data = response.get_json()
+        response = client.get(f'/api/reviews?listing_id={product_id}')
+        assert response.status_code == 200        data = response.get_json()
         assert isinstance(data, list)
 
     def test_unauthorized_access(self, client):
