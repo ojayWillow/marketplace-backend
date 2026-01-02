@@ -76,8 +76,7 @@ def test_listing(client, auth_tokens, db_session):
         'price': 100.00,
         'category': 'Electronics',
         'location': 'Test City'
-    }    }
-
+    }
 
 @pytest.fixture(scope='function')
 def create_test_review(client, auth_tokens, test_listing, db_session):
