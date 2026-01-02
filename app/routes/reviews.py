@@ -77,8 +77,7 @@ def create_review(current_user_id):
             reviewer_id=current_user_id,
             reviewed_user_id=data['reviewed_user_id'],
             rating=data['rating'],
-            comment=data.get('comment'),
-            listing_id=data.get('listing_id'),
+                        content=data.get('comment'),           listing_id=data.get('listing_id'),
             task_id=data.get('task_id')
         )
         
@@ -122,9 +121,7 @@ def update_review(current_user_id, review_id):
             review.rating = data['rating']
         
         if 'comment' in data:
-            review.comment = data['comment']
-        
-        review.updated_at = datetime.utcnow()
+                        review.content = data['comment']  review.updated_at = datetime.utcnow()
         db.session.commit()
         
         return jsonify({'message': 'Review updated', 'review': review.to_dict()}), 200
