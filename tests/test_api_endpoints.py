@@ -95,8 +95,13 @@ class TestAPIEndpoints:
         
         # Create review
         review_data = {
-            'reviewed_user_id': auth_tokens['user_id'],            'rating': 5,
-            'listing_id': product_id,        }
+            'reviewed_user_id': auth_tokens[',
+            'listing_id': product_id,
+            'rating': 5,
+            'content': 'Flow test review'
+        }
+
+        response = client.post(
             'content': 'Flow test review'        response = client.post(
                 
             '/api/reviews',
