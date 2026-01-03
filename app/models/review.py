@@ -9,12 +9,16 @@ class Review(db.Model):
     __tablename__ = 'reviews'
 
     id = db.Column(db.Integer, primary_key=True)
-    rating = db.Column(db.Float, nullable=False)
-    content = db.Column(db.Text, nullable=True)
+    rating = db.Column(db.Float, nullable=False)  # 1-5 stars
+    content = db.Column(db.Text, nullable=True)  # Optional comment
     reviewer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     reviewed_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=True)
     task_id = db.Column(db.Integer, db.ForeignKey('task_requests.id'), nullable=True)
+    
+    # Review type: 'client_review' (task creator reviews worker) or 'worker_review' (worker reviews client)
+    review_type = db.Column(db.String(20), nullable=True)  # 'client_review', 'worker_review'
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -32,6 +36,7 @@ class Review(db.Model):
             'reviewed_user_id': self.reviewed_user_id,
             'listing_id': self.listing_id,
             'task_id': self.task_id,
+            'review_type': self.review_type,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
