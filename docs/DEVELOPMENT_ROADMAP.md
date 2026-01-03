@@ -1,5 +1,7 @@
 # Marketplace Backend - Complete Development Roadmap
 
+**Last Updated**: January 4, 2026
+
 ## Project Overview
 A Flask-based REST API for a dual-segment marketplace:
 1. **Buy/Sell Classifieds** (like ss.com)
@@ -36,11 +38,11 @@ A Flask-based REST API for a dual-segment marketplace:
   - Status, priority, deadline
   - Responses count, views
   
-- [x] **Review Model** (`app/models/review.py`) - NEW - For ratings/feedback
+- [x] **Review Model** (`app/models/review.py`) - For ratings/feedback
   - Rating, content, reviewer info
   - Relationships to users & listings
   
-- [x] **TaskResponse Model** (`app/models/task_response.py`) - NEW - For task applications
+- [x] **TaskResponse Model** (`app/models/task_response.py`) - For task applications
   - Message, acceptance status
   - Task & user relationships
 
@@ -57,282 +59,232 @@ A Flask-based REST API for a dual-segment marketplace:
 - [x] API_TESTING_GUIDE.md
 - [x] Code comments in modules
 
-### 1.5 Bug Fixes (TODAY ✓)
+### 1.5 Bug Fixes
 - [x] Fixed indentation errors in all models
 - [x] Fixed syntax errors in __init__.py
 - [x] Verified all imports work correctly
 
 ---
 
-## 🔨 PHASE 2: API ROUTE IMPLEMENTATION (IN PROGRESS)
+## ✅ PHASE 2: API ROUTE IMPLEMENTATION (COMPLETED)
 
 ### 2.1 Authentication Routes (`app/routes/auth.py`) 
-**Status: SCAFFOLDED - NEEDS IMPLEMENTATION**
+**Status: ✅ COMPLETED**
 
-| Endpoint | Method | Status | Priority | Task |
-|----------|--------|--------|----------|------|
-| `/api/auth/register` | POST | ❌ NOT IMPLEMENTED | 🔴 HIGH | Implement user registration with password hashing |
-| `/api/auth/login` | POST | ❌ NOT IMPLEMENTED | 🔴 HIGH | Implement JWT token generation |
-| `/api/auth/profile` | GET | ❌ NOT IMPLEMENTED | 🔴 HIGH | Get authenticated user profile |
-| `/api/auth/logout` | POST | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Invalidate JWT tokens |
-| `/api/auth/refresh-token` | POST | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Refresh JWT token |
-| `/api/auth/update-profile` | PUT | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Update user profile info |
+| Endpoint | Method | Status | Notes |
+|----------|--------|--------|-------|
+| `/api/auth/register` | POST | ✅ DONE | User registration with password hashing |
+| `/api/auth/login` | POST | ✅ DONE | JWT token generation |
+| `/api/auth/profile` | GET | ✅ DONE | Get authenticated user profile |
+| `/api/auth/profile` | PUT | ✅ DONE | Update user profile info |
+| `/api/auth/logout` | POST | ⬜ TODO | Token invalidation (optional for MVP) |
+| `/api/auth/refresh-token` | POST | ⬜ TODO | Refresh JWT token (optional for MVP) |
 
-**Implementation Checklist:**
-- [ ] Create request validation using marshmallow or pydantic
-- [ ] Implement password hashing (werkzeug.security)
-- [ ] Set up JWT token generation & verification
-- [ ] Create authentication middleware decorator
-- [ ] Add error handling & response formatting
-- [ ] Write unit tests
+**Completed:**
+- [x] Password hashing (werkzeug.security)
+- [x] JWT token generation & verification (flask-jwt-extended)
+- [x] Authentication middleware decorator (@jwt_required)
+- [x] Error handling & response formatting
 
 ---
 
 ### 2.2 Listings Routes (`app/routes/listings.py`)
-**Status: SCAFFOLDED - NEEDS IMPLEMENTATION**
+**Status: ✅ COMPLETED**
 
-| Endpoint | Method | Status | Priority | Task |
-|----------|--------|--------|----------|------|
-| `/api/listings` | GET | ❌ NOT IMPLEMENTED | 🔴 HIGH | List all listings with pagination & filtering |
-| `/api/listings` | POST | ❌ NOT IMPLEMENTED | 🔴 HIGH | Create new listing |
-| `/api/listings/<id>` | GET | ❌ NOT IMPLEMENTED | 🔴 HIGH | Get single listing details |
-| `/api/listings/<id>` | PUT | ❌ NOT IMPLEMENTED | 🔴 HIGH | Update listing |
-| `/api/listings/<id>` | DELETE | ❌ NOT IMPLEMENTED | 🔴 HIGH | Delete listing |
-| `/api/listings/<id>/images` | POST | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Upload listing images |
-| `/api/listings/search` | GET | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Search listings with advanced filters |
-| `/api/listings/<id>/similar` | GET | ❌ NOT IMPLEMENTED | 🟡 LOW | Get similar listings |
+| Endpoint | Method | Status | Notes |
+|----------|--------|--------|-------|
+| `/api/listings` | GET | ✅ DONE | List all listings with pagination & filtering |
+| `/api/listings` | POST | ✅ DONE | Create new listing |
+| `/api/listings/<id>` | GET | ✅ DONE | Get single listing details |
+| `/api/listings/<id>` | PUT | ✅ DONE | Update listing |
+| `/api/listings/<id>` | DELETE | ✅ DONE | Delete listing |
+| `/api/listings/my` | GET | ✅ DONE | Get current user's listings |
+| `/api/listings/<id>/images` | POST | ⬜ TODO | Upload listing images |
+| `/api/listings/search` | GET | ⬜ TODO | Advanced search |
 
-**Implementation Checklist:**
-- [ ] Implement CRUD operations (Create, Read, Update, Delete)
-- [ ] Add pagination (limit, offset, page-based)
-- [ ] Add filtering (category, price range, condition, location)
-- [ ] Add sorting (date, price, relevance)
-- [ ] Implement image upload/storage
-- [ ] Add search functionality
-- [ ] Implement status transitions (active, sold, archived)
-- [ ] Add seller verification checks
-- [ ] Write comprehensive tests
+**Completed:**
+- [x] CRUD operations (Create, Read, Update, Delete)
+- [x] Pagination (page, per_page)
+- [x] Filtering (category, status)
+- [x] User's own listings endpoint
 
 ---
 
 ### 2.3 Tasks Routes (`app/routes/tasks.py`)
-**Status: SCAFFOLDED - NEEDS IMPLEMENTATION**
+**Status: ✅ COMPLETED**
 
-| Endpoint | Method | Status | Priority | Task |
-|----------|--------|--------|----------|------|
-| `/api/tasks` | GET | ❌ NOT IMPLEMENTED | 🔴 HIGH | List all task requests |
-| `/api/tasks` | POST | ❌ NOT IMPLEMENTED | 🔴 HIGH | Create new task request |
-| `/api/tasks/<id>` | GET | ❌ NOT IMPLEMENTED | 🔴 HIGH | Get task details |
-| `/api/tasks/<id>` | PUT | ❌ NOT IMPLEMENTED | 🔴 HIGH | Update task |
-| `/api/tasks/<id>` | DELETE | ❌ NOT IMPLEMENTED | 🔴 HIGH | Delete task |
-| `/api/tasks/<id>/responses` | GET | ❌ NOT IMPLEMENTED | 🔴 HIGH | Get task responses/applications |
-| `/api/tasks/<id>/responses` | POST | ❌ NOT IMPLEMENTED | 🔴 HIGH | Submit task response/apply |
-| `/api/tasks/<id>/accept-response` | POST | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Accept a response |
-| `/api/tasks/<id>/reject-response` | POST | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Reject a response |
-| `/api/tasks/<id>/complete` | POST | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Mark task as completed |
-| `/api/tasks/assigned-to-me` | GET | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Get tasks assigned to user |
-| `/api/tasks/created-by-me` | GET | ❌ NOT IMPLEMENTED | 🟠 MEDIUM | Get tasks created by user |
+| Endpoint | Method | Status | Notes |
+|----------|--------|--------|-------|
+| `/api/tasks` | GET | ✅ DONE | List tasks with location filtering |
+| `/api/tasks` | POST | ✅ DONE | Create new task request |
+| `/api/tasks/<id>` | GET | ✅ DONE | Get task details |
+| `/api/tasks/<id>` | PUT | ✅ DONE | Update task |
+| `/api/tasks/<id>` | DELETE | ✅ DONE | Delete task |
+| `/api/tasks/<id>/accept` | POST | ✅ DONE | Accept/assign task to worker |
+| `/api/tasks/<id>/done` | POST | ✅ DONE | Worker marks task as done |
+| `/api/tasks/<id>/confirm` | POST | ✅ DONE | Creator confirms completion |
+| `/api/tasks/<id>/dispute` | POST | ✅ DONE | Creator disputes completion |
+| `/api/tasks/my` | GET | ✅ DONE | Get tasks assigned to current user |
+| `/api/tasks/created` | GET | ✅ DONE | Get tasks created by current user |
 
-**Implementation Checklist:**
-- [ ] Implement CRUD for task requests
-- [ ] Implement CRUD for task responses
-- [ ] Add pagination & filtering
-- [ ] Add status transitions (open, in-progress, completed, cancelled)
-- [ ] Implement response acceptance/rejection logic
-- [ ] Add budget & pricing logic
-- [ ] Implement task deadline tracking
-- [ ] Add task completion workflow
-- [ ] Write comprehensive tests
+**Completed:**
+- [x] Full CRUD for task requests
+- [x] Location-based task search (latitude, longitude, radius)
+- [x] Haversine distance calculation
+- [x] Complete task workflow (open → assigned → pending_confirmation → completed)
+- [x] Task acceptance by workers
+- [x] Mark done / confirm / dispute flow
+- [x] Status transitions
 
 ---
 
-### 2.4 Reviews Routes (NEW - TO CREATE)
-**Status: ❌ NEEDS CREATION**
+### 2.4 Reviews Routes (`app/routes/reviews.py`)
+**Status: ✅ COMPLETED**
 
-| Endpoint | Method | Status | Priority | Task |
-|----------|--------|--------|----------|------|
-| `/api/reviews/<entity-type>/<entity-id>` | GET | ❌ NEEDS CREATION | 🟠 MEDIUM | Get reviews for listing/user/task |
-| `/api/reviews` | POST | ❌ NEEDS CREATION | 🟠 MEDIUM | Create new review |
-| `/api/reviews/<id>` | GET | ❌ NEEDS CREATION | 🟠 MEDIUM | Get review details |
-| `/api/reviews/<id>` | PUT | ❌ NEEDS CREATION | 🟠 MEDIUM | Update review |
-| `/api/reviews/<id>` | DELETE | ❌ NEEDS CREATION | 🟠 MEDIUM | Delete review |
-| `/api/users/<id>/rating` | GET | ❌ NEEDS CREATION | 🟠 MEDIUM | Get user's average rating |
+| Endpoint | Method | Status | Notes |
+|----------|--------|--------|-------|
+| `/api/reviews` | GET | ✅ DONE | Get reviews (filter by user/task) |
+| `/api/reviews` | POST | ✅ DONE | Create new review |
+| `/api/reviews/<id>` | GET | ✅ DONE | Get review details |
+| `/api/reviews/<id>` | PUT | ✅ DONE | Update review |
+| `/api/reviews/<id>` | DELETE | ✅ DONE | Delete review |
+| `/api/users/<id>/reviews` | GET | ✅ DONE | Get all reviews for a user |
 
 ---
 
 ### 2.5 Health & Status Routes
-**Status: PARTIAL**
+**Status: ✅ COMPLETED**
 
 | Endpoint | Method | Status | Notes |
 |----------|--------|--------|-------|
-| `/health` | GET | ✅ IMPLEMENTED | Basic server health check |
-| `/status` | GET | ❌ NEEDS CREATION | Detailed system status with DB & cache |
+| `/health` | GET | ✅ DONE | Basic server health check |
 
 ---
 
-## 🔄 PHASE 3: CROSS-CUTTING CONCERNS (NEEDS IMPLEMENTATION)
+## ✅ PHASE 3: CROSS-CUTTING CONCERNS (MOSTLY COMPLETED)
 
 ### 3.1 Input Validation & Error Handling
-**Status: ❌ NEEDS IMPLEMENTATION**
+**Status: ✅ BASIC IMPLEMENTATION DONE**
 
 | Component | Status | Details |
-|-----------|--------|---------|
-| Request validation | ❌ NOT DONE | Need schema validation (Marshmallow/Pydantic) |
-| Error response formatting | ❌ NOT DONE | Standardized error response format |
-| HTTP status codes | ❌ NOT DONE | Proper status code usage |
-| Validation messages | ❌ NOT DONE | User-friendly validation error messages |
-| Exception handling | ❌ NOT DONE | Global exception handling middleware |
-
-**Tasks:**
-- [ ] Set up Marshmallow or Pydantic for validation
-- [ ] Create custom exception classes
-- [ ] Implement error response formatter
-- [ ] Add input sanitization
-- [ ] Add rate limiting
-- [ ] Add request logging
+|-----------|--------|--------|
+| Request validation | ✅ DONE | Basic validation in route handlers |
+| Error response formatting | ✅ DONE | Consistent JSON error responses |
+| HTTP status codes | ✅ DONE | Proper status code usage |
+| Exception handling | ✅ DONE | Try/catch in routes |
 
 ---
 
 ### 3.2 Authentication & Authorization
-**Status: ⚠️ PARTIAL**
+**Status: ✅ COMPLETED**
 
 | Component | Status | Details |
-|-----------|--------|---------|
-| JWT tokens | ❌ NOT IMPLEMENTED | Token generation, validation, refresh |
-| Password hashing | ❌ NOT IMPLEMENTED | Using werkzeug.security |
-| Authentication decorator | ❌ NOT IMPLEMENTED | Protect routes with @auth_required |
-| Authorization levels | ❌ NOT IMPLEMENTED | Admin, seller, buyer roles |
-| Permission checks | ❌ NOT IMPLEMENTED | User can only modify own resources |
-| Session management | ❌ NOT IMPLEMENTED | Token blacklist, expiration |
-
-**Tasks:**
-- [ ] Implement JWT token generation (PyJWT)
-- [ ] Create authentication decorator
-- [ ] Implement role-based access control (RBAC)
-- [ ] Add permission checking logic
-- [ ] Create token refresh mechanism
-- [ ] Implement logout/token blacklist
+|-----------|--------|--------|
+| JWT tokens | ✅ DONE | flask-jwt-extended |
+| Password hashing | ✅ DONE | werkzeug.security |
+| Authentication decorator | ✅ DONE | @jwt_required() |
+| Permission checks | ✅ DONE | Users can only modify own resources |
 
 ---
 
-### 3.3 Database Initialization & Migrations
-**Status: ⚠️ NEEDS SETUP**
+### 3.3 Database
+**Status: ✅ WORKING**
 
 | Component | Status | Details |
-|-----------|--------|---------|
-| Auto-create tables | ⚠️ PARTIAL | db.create_all() on first API call |
-| Database migrations | ❌ NOT DONE | Flask-Migrate for schema changes |
-| Seed data | ❌ NOT DONE | Test data for development |
-| Backup strategy | ❌ NOT DONE | Database backup automation |
-
-**Tasks:**
-- [ ] Set up Flask-Migrate for migrations
-- [ ] Create initial migration
-- [ ] Create seed data script
-- [ ] Document backup procedure
-- [ ] Test migration workflow
+|-----------|--------|--------|
+| SQLite for development | ✅ DONE | Working locally |
+| Auto-create tables | ✅ DONE | db.create_all() |
+| Database migrations | ⬜ TODO | Flask-Migrate (not critical for MVP) |
 
 ---
 
 ### 3.4 Pagination & Filtering
-**Status: ❌ NEEDS IMPLEMENTATION**
+**Status: ✅ COMPLETED**
 
-| Component | Status | Task |
-|-----------|--------|------|
-| Pagination | ❌ NOT DONE | Implement page-based & limit-offset |
-| Filtering | ❌ NOT DONE | Category, price range, location, etc. |
-| Sorting | ❌ NOT DONE | Sort by date, price, relevance |
-| Search | ❌ NOT DONE | Full-text search or basic keyword search |
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Pagination | ✅ DONE | page, per_page parameters |
+| Filtering | ✅ DONE | Category, status, location |
+| Location search | ✅ DONE | Radius-based with Haversine formula |
 
 ---
 
-## 🎯 PHASE 4: TESTING & QUALITY ASSURANCE (NEEDS IMPLEMENTATION)
+## 🔲 PHASE 4: TESTING & QUALITY ASSURANCE (FUTURE)
 
 ### 4.1 Testing
-**Status: ❌ NEEDS IMPLEMENTATION**
+**Status: ⬜ NOT STARTED (Not critical for MVP)**
 
-| Test Type | Status | Coverage |
-|-----------|--------|----------|
-| Unit tests | ❌ NOT DONE | Models & utility functions |
-| Integration tests | ❌ NOT DONE | API endpoints |
-| E2E tests | ❌ NOT DONE | Full workflows |
-| Load tests | ❌ NOT DONE | Performance testing |
-
-**Tasks:**
-- [ ] Set up pytest framework
-- [ ] Write model tests
-- [ ] Write API endpoint tests
-- [ ] Write authentication tests
-- [ ] Write database tests
-- [ ] Achieve 80%+ code coverage
+| Test Type | Status |
+|-----------|--------|
+| Unit tests | ⬜ TODO |
+| Integration tests | ⬜ TODO |
+| E2E tests | ⬜ TODO |
 
 ---
 
-### 4.2 Documentation
-**Status: ⚠️ PARTIAL**
-
-| Document | Status |
-|----------|--------|
-| API documentation | ❌ NEEDS ENHANCEMENT | Add request/response examples |
-| Setup guide | ✅ DONE | Initial setup documented |
-| Testing guide | ⚠️ PARTIAL | Basic guide exists, needs expansion |
-| Database schema | ❌ NEEDS CREATION | ER diagram & schema docs |
-| Code comments | ⚠️ PARTIAL | Add docstrings to all functions |
-
----
-
-## 🚀 PHASE 5: ENHANCED FEATURES (PLANNED FOR LATER)
+## 🔲 PHASE 5: ENHANCED FEATURES (FUTURE)
 
 ### 5.1 Image Management
-**Status: ❌ NEEDS IMPLEMENTATION**
-
-- [ ] Image upload to server/cloud storage (AWS S3, etc.)
+- [ ] Image upload to cloud storage
 - [ ] Image resizing & optimization
-- [ ] Image URL generation
-- [ ] Image deletion on resource removal
-- [ ] Image validation (format, size)
 
----
-
-### 5.2 Search & Recommendations
-**Status: ❌ NEEDS IMPLEMENTATION**
-
-- [ ] Full-text search implementation
-- [ ] Advanced filtering
-- [ ] Similar listings/tasks algorithm
-- [ ] Search result ranking
-- [ ] Recent searches tracking
-
----
-
-### 5.3 Notifications & Messaging
-**Status: ❌ NEEDS IMPLEMENTATION**
-
+### 5.2 Notifications & Messaging
 - [ ] Email notifications
 - [ ] In-app notifications
-- [ ] Task response notifications
-- [ ] Review notifications
-- [ ] Message/chat functionality
-- [ ] WebSocket for real-time updates
+- [ ] Real-time messaging
 
----
-
-### 5.4 Payments & Stripe Integration
-**Status: ❌ NEEDS IMPLEMENTATION**
-
-- [ ] Stripe account setup
+### 5.3 Payments & Stripe Integration
 - [ ] Payment processing
-- [ ] Subscription handling
-- [ ] Invoice generation
-- [ ] Refund handling
-- [ ] Payment history
+- [ ] Escrow for tasks
 
 ---
 
-### 5.5 Analytics & Admin Dashboard
-**Status: ❌ NEEDS IMPLEMENTATION**
+## Progress Summary
 
-- [ ] User analytics
-- [ ] Transaction analytics
-- [ ] Admin user management
--
+| Phase | Status | Completion |
+|-------|--------|------------|
+| 1. Foundation & Setup | ✅ Complete | 100% |
+| 2. API Routes | ✅ Complete | 95% |
+| 3. Cross-cutting Concerns | ✅ Complete | 85% |
+| 4. Testing | ⬜ Not Started | 0% |
+| 5. Enhanced Features | ⬜ Not Started | 0% |
+
+**Overall MVP Status: ~90% Complete** 🎉
+
+---
+
+## What's Working (January 4, 2026)
+
+### Authentication
+- ✅ User registration
+- ✅ User login with JWT
+- ✅ Profile viewing and editing
+
+### Classifieds (Buy/Sell)
+- ✅ Create, read, update, delete listings
+- ✅ Browse listings with pagination
+- ✅ Filter by category
+
+### Quick Help (Tasks)
+- ✅ Create tasks with location
+- ✅ Browse tasks by location (radius search)
+- ✅ Accept tasks as worker
+- ✅ Mark task as done (worker)
+- ✅ Confirm completion (creator)
+- ✅ Dispute task (creator)
+- ✅ View my assigned tasks
+- ✅ View my created tasks
+
+### Reviews
+- ✅ Create reviews for users
+- ✅ View reviews
+
+---
+
+## Next Steps (Post-MVP)
+
+1. **Image uploads** - Allow photos for listings and profiles
+2. **Email notifications** - Task updates, new messages
+3. **Messaging system** - Chat between users
+4. **Payment integration** - Stripe for task payments
+5. **Admin dashboard** - Manage users, listings, tasks
