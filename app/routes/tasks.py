@@ -1,6 +1,7 @@
 """Task request routes for quick help services marketplace."""
 
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db
 from app.models import TaskRequest, User
 from datetime import datetime
@@ -18,6 +19,27 @@ def distance(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
     return R * c
+
+
+@tasks_bp.route('/my', methods=['GET'])
+@jwt_required()
+def get_my_tasks():
+    """Get tasks assigned to the current user."""
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Get tasks where current user is assigned and status is 'assigned' or 'accepted'
+        my_tasks = TaskRequest.query.filter(
+            TaskRequest.assigned_to_id == current_user_id,
+            TaskRequest.status.in_(['assigned', 'accepted'])
+        ).order_by(TaskRequest.created_at.desc()).all()
+        
+        return jsonify({
+            'tasks': [task.to_dict() for task in my_tasks],
+            'total': len(my_tasks)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @tasks_bp.route('', methods=['GET'])
