@@ -46,6 +46,7 @@ class TaskRequest(db.Model):
             'latitude': self.latitude,
             'longitude': self.longitude,
             'creator_id': self.creator_id,
+            'assigned_to_id': self.assigned_to_id,
             'radius': self.radius,
             'required_skills': self.required_skills,
             'images': self.images,
