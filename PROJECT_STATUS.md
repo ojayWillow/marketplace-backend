@@ -81,6 +81,31 @@
 
 ---
 
+## Current Session: January 4, 2026 (Session 5)
+### What We Accomplished Today:
+
+#### ✅ COMPLETED TASKS:
+
+1. **Image Upload System** - Full file upload functionality
+   - Created `/api/uploads` endpoint with validation
+   - File type checking (JPG, PNG, GIF, WebP)
+   - File size limit (5MB max)
+   - Secure file storage in uploads/ folder
+   - Returns URL for uploaded images
+
+2. **JWT Token Authentication Fix** - Unified token system
+   - Fixed token mismatch between auth.py and tasks.py
+   - Both now use same SECRET_KEY and jwt.decode() method
+   - Resolved persistent 401 errors on /api/tasks/my
+   - Token now properly validates across all endpoints
+
+3. **User Profile Public Endpoints** - Backend already existed
+   - GET /api/auth/users/:id - Public user profile
+   - GET /api/auth/users/:id/reviews - User's received reviews
+   - Includes stats (rating, completion rate)
+
+---
+
 ## Project Overview
 
 **Latvian Marketplace Platform** - A Flask-based backend API for a multi-segment marketplace platform
