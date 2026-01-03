@@ -44,7 +44,9 @@ def get_tasks():
             if latitude and longitude:
                 dist = distance(latitude, longitude, task.latitude, task.longitude)
                 if dist <= radius:
-                    results.append(task.to_dict())
+                    task_dict = task.to_dict()
+                    task_dict['distance'] = round(dist, 2)
+                    results.append(task_dict)
             else:
                 results.append(task.to_dict())
         
@@ -79,6 +81,15 @@ def create_task():
         if not all(k in data for k in ['title', 'description', 'category', 'creator_id', 'latitude', 'longitude', 'location']):
             return jsonify({'error': 'Missing required fields'}), 400
         
+        # Parse deadline if provided
+        deadline = None
+        if data.get('deadline'):
+            try:
+                # Handle ISO format: "2026-01-05T19:03"
+                deadline = datetime.fromisoformat(data['deadline'])
+            except ValueError:
+                return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
+        
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
@@ -88,7 +99,7 @@ def create_task():
             longitude=data['longitude'],
             creator_id=data['creator_id'],
             budget=data.get('budget'),
-            deadline=data.get('deadline'),
+            deadline=deadline,
             priority=data.get('priority', 'normal'),
             is_urgent=data.get('is_urgent', False)
         )
