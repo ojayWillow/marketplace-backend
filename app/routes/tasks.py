@@ -1,13 +1,40 @@
 """Task request routes for quick help services marketplace."""
 
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db
 from app.models import TaskRequest, User
 from datetime import datetime
 from math import radians, sin, cos, sqrt, atan2
+from functools import wraps
+import jwt
+import os
 
 tasks_bp = Blueprint('tasks', __name__)
+
+# Use same SECRET_KEY as auth.py
+SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+
+
+def token_required(f):
+    """Decorator to require valid JWT token - same method as auth.py"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'error': 'Token is missing'}), 401
+        
+        try:
+            # Remove 'Bearer ' prefix
+            token = token.split(' ')[1] if ' ' in token else token
+            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            current_user_id = payload['user_id']
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except Exception as e:
+            return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
+        
+        return f(current_user_id, *args, **kwargs)
+    return decorated
 
 
 def distance(lat1, lon1, lat2, lon2):
@@ -22,16 +49,14 @@ def distance(lat1, lon1, lat2, lon2):
 
 
 @tasks_bp.route('/my', methods=['GET'])
-@jwt_required()
-def get_my_tasks():
+@token_required
+def get_my_tasks(current_user_id):
     """Get tasks assigned to the current user."""
     try:
-        current_user_id = get_jwt_identity()
-        
         # Get tasks where current user is assigned and status is 'assigned' or 'accepted'
         my_tasks = TaskRequest.query.filter(
             TaskRequest.assigned_to_id == current_user_id,
-            TaskRequest.status.in_(['assigned', 'accepted'])
+            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress'])
         ).order_by(TaskRequest.created_at.desc()).all()
         
         return jsonify({
