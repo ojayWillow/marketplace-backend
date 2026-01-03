@@ -19,18 +19,27 @@ def token_required(f):
     """Decorator to require valid JWT token - same method as auth.py"""
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
+        auth_header = request.headers.get('Authorization')
+        print(f"DEBUG: Authorization header: {auth_header}")  # DEBUG
+        
+        if not auth_header:
+            print("DEBUG: No Authorization header found")  # DEBUG
             return jsonify({'error': 'Token is missing'}), 401
         
         try:
             # Remove 'Bearer ' prefix
-            token = token.split(' ')[1] if ' ' in token else token
+            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
+            print(f"DEBUG: Token (first 50 chars): {token[:50]}...")  # DEBUG
+            print(f"DEBUG: Using SECRET_KEY: {SECRET_KEY[:20]}...")  # DEBUG
+            
             payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            print(f"DEBUG: Decoded payload: {payload}")  # DEBUG
             current_user_id = payload['user_id']
         except jwt.ExpiredSignatureError:
+            print("DEBUG: Token expired")  # DEBUG
             return jsonify({'error': 'Token has expired'}), 401
         except Exception as e:
+            print(f"DEBUG: Token decode error: {type(e).__name__}: {e}")  # DEBUG
             return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
         
         return f(current_user_id, *args, **kwargs)
