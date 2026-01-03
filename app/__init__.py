@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager  # ADD THIS
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 db = SQLAlchemy()
+jwt = JWTManager()  # ADD THIS
 
 def create_app(config_name='development'):
     app = Flask(__name__)
@@ -17,12 +19,18 @@ def create_app(config_name='development'):
     elif config_name == 'testing':
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['TESTING'] = True
-        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # JWT Configuration - ADD THESE LINES
+    app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
+    app.config['JWT_TOKEN_LOCATION'] = ['headers']
+    app.config['JWT_HEADER_NAME'] = 'Authorization'
+    app.config['JWT_HEADER_TYPE'] = 'Bearer'
     
     # Initialize extensions
     db.init_app(app)
+    jwt.init_app(app)  # ADD THIS
     CORS(app)
-    
     
     # Health check route
     @app.route('/health', methods=['GET'])
