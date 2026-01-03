@@ -20,26 +20,18 @@ def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
-        print(f"DEBUG: Authorization header: {auth_header}")  # DEBUG
         
         if not auth_header:
-            print("DEBUG: No Authorization header found")  # DEBUG
             return jsonify({'error': 'Token is missing'}), 401
         
         try:
             # Remove 'Bearer ' prefix
             token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            print(f"DEBUG: Token (first 50 chars): {token[:50]}...")  # DEBUG
-            print(f"DEBUG: Using SECRET_KEY: {SECRET_KEY[:20]}...")  # DEBUG
-            
             payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            print(f"DEBUG: Decoded payload: {payload}")  # DEBUG
             current_user_id = payload['user_id']
         except jwt.ExpiredSignatureError:
-            print("DEBUG: Token expired")  # DEBUG
             return jsonify({'error': 'Token has expired'}), 401
         except Exception as e:
-            print(f"DEBUG: Token decode error: {type(e).__name__}: {e}")  # DEBUG
             return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
         
         return f(current_user_id, *args, **kwargs)
@@ -60,17 +52,33 @@ def distance(lat1, lon1, lat2, lon2):
 @tasks_bp.route('/my', methods=['GET'])
 @token_required
 def get_my_tasks(current_user_id):
-    """Get tasks assigned to the current user."""
+    """Get tasks assigned to the current user (as worker)."""
     try:
-        # Get tasks where current user is assigned and status is 'assigned' or 'accepted'
         my_tasks = TaskRequest.query.filter(
             TaskRequest.assigned_to_id == current_user_id,
-            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress'])
+            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation'])
         ).order_by(TaskRequest.created_at.desc()).all()
         
         return jsonify({
             'tasks': [task.to_dict() for task in my_tasks],
             'total': len(my_tasks)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/created', methods=['GET'])
+@token_required
+def get_created_tasks(current_user_id):
+    """Get tasks created by the current user (as client)."""
+    try:
+        created_tasks = TaskRequest.query.filter(
+            TaskRequest.creator_id == current_user_id
+        ).order_by(TaskRequest.created_at.desc()).all()
+        
+        return jsonify({
+            'tasks': [task.to_dict() for task in created_tasks],
+            'total': len(created_tasks)
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -141,7 +149,6 @@ def create_task():
         deadline = None
         if data.get('deadline'):
             try:
-                # Handle ISO format: "2026-01-05T19:03"
                 deadline = datetime.fromisoformat(data['deadline'])
             except ValueError:
                 return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
@@ -180,11 +187,18 @@ def accept_task(task_id):
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
+        if task.status != 'open':
+            return jsonify({'error': 'Task is no longer available'}), 400
+        
         data = request.get_json()
         user_id = data.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'User ID required'}), 400
+        
+        # Can't accept your own task
+        if task.creator_id == user_id:
+            return jsonify({'error': 'You cannot accept your own task'}), 400
         
         task.assigned_to_id = user_id
         task.status = 'assigned'
@@ -200,13 +214,50 @@ def accept_task(task_id):
         return jsonify({'error': str(e)}), 500
 
 
-@tasks_bp.route('/<int:task_id>/complete', methods=['POST'])
-def complete_task(task_id):
-    """Mark a task as completed."""
+@tasks_bp.route('/<int:task_id>/mark-done', methods=['POST'])
+@token_required
+def mark_task_done(current_user_id, task_id):
+    """Worker marks task as done - awaiting creator confirmation."""
     try:
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the assigned worker can mark as done
+        if task.assigned_to_id != current_user_id:
+            return jsonify({'error': 'Only the assigned worker can mark this task as done'}), 403
+        
+        if task.status not in ['assigned', 'in_progress']:
+            return jsonify({'error': 'Task cannot be marked as done in current status'}), 400
+        
+        task.status = 'pending_confirmation'
+        task.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Task marked as done. Waiting for creator confirmation.',
+            'task': task.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>/confirm', methods=['POST'])
+@token_required
+def confirm_task_completion(current_user_id, task_id):
+    """Creator confirms task completion."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can confirm completion
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can confirm completion'}), 403
+        
+        if task.status != 'pending_confirmation':
+            return jsonify({'error': 'Task is not pending confirmation'}), 400
         
         task.status = 'completed'
         task.completed_at = datetime.utcnow()
@@ -214,7 +265,68 @@ def complete_task(task_id):
         db.session.commit()
         
         return jsonify({
-            'message': 'Task completed successfully',
+            'message': 'Task completed! Both parties can now leave reviews.',
+            'task': task.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>/dispute', methods=['POST'])
+@token_required
+def dispute_task(current_user_id, task_id):
+    """Creator disputes that task was completed properly."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can dispute
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can dispute'}), 403
+        
+        if task.status != 'pending_confirmation':
+            return jsonify({'error': 'Task is not pending confirmation'}), 400
+        
+        data = request.get_json() or {}
+        reason = data.get('reason', '')
+        
+        task.status = 'disputed'
+        task.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Task has been disputed. Please resolve with the worker.',
+            'task': task.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>/cancel', methods=['POST'])
+@token_required
+def cancel_task(current_user_id, task_id):
+    """Cancel a task (only creator can cancel, only if not yet completed)."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can cancel
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can cancel'}), 403
+        
+        if task.status in ['completed', 'cancelled']:
+            return jsonify({'error': 'Task cannot be cancelled'}), 400
+        
+        task.status = 'cancelled'
+        task.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Task has been cancelled.',
             'task': task.to_dict()
         }), 200
     except Exception as e:
