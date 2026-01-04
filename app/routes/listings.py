@@ -1,6 +1,6 @@
 """Listing routes for classifieds buy/sell marketplace."""
 
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Listing, User
 from datetime import datetime
@@ -55,31 +55,10 @@ def get_listings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@listings_bp.route('/my', methods=['GET', 'OPTIONS'])
-def get_my_listings_route():
+@listings_bp.route('/my', methods=['GET'])
+@token_required
+def get_my_listings(current_user_id):
     """Get authenticated user's own listings."""
-    # Handle CORS preflight
-    if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        return response, 200
-    
-    # Require token for GET
-    token = request.headers.get('Authorization')
-    if not token:
-        return jsonify({'error': 'Token is missing'}), 401
-    
-    try:
-        token_value = token.split(' ')[1]
-        data = jwt.decode(token_value, SECRET_KEY, algorithms=['HS256'])
-        current_user_id = data['user_id']
-    except jwt.ExpiredSignatureError:
-        return jsonify({'error': 'Token has expired'}), 401
-    except Exception as e:
-        return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
-    
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
