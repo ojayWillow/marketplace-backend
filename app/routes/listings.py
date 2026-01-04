@@ -44,6 +44,33 @@ def get_listings():
         if category:
             query = query.filter_by(category=category)
         
+        # Order by newest first
+        query = query.order_by(Listing.created_at.desc())
+        
+        listings = query.paginate(page=page, per_page=per_page)
+        
+        return jsonify([listing.to_dict() for listing in listings.items]), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@listings_bp.route('/my', methods=['GET'])
+@token_required
+def get_my_listings(current_user_id):
+    """Get authenticated user's own listings."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        status = request.args.get('status')  # Optional filter by status
+        
+        query = Listing.query.filter_by(seller_id=current_user_id)
+        
+        # Filter by status if provided, otherwise return all
+        if status:
+            query = query.filter_by(status=status)
+        
+        # Order by newest first
+        query = query.order_by(Listing.created_at.desc())
+        
         listings = query.paginate(page=page, per_page=per_page)
         
         return jsonify({
@@ -89,7 +116,9 @@ def create_listing(current_user_id):
             seller_id=current_user_id,
             location=data.get('location'),
             latitude=data.get('latitude'),
-            longitude=data.get('longitude')
+            longitude=data.get('longitude'),
+            images=data.get('images'),
+            contact_info=data.get('contact_info')
         )
         
         db.session.add(listing)
@@ -111,6 +140,10 @@ def update_listing(current_user_id, listing_id):
         listing = Listing.query.get(listing_id)
         if not listing:
             return jsonify({'error': 'Listing not found'}), 404
+        
+        # Check ownership
+        if listing.seller_id != current_user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
         
         data = request.get_json()
         
@@ -137,6 +170,10 @@ def delete_listing(current_user_id, listing_id):
         listing = Listing.query.get(listing_id)
         if not listing:
             return jsonify({'error': 'Listing not found'}), 404
+        
+        # Check ownership
+        if listing.seller_id != current_user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
         
         db.session.delete(listing)
         db.session.commit()
