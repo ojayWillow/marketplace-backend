@@ -1,6 +1,6 @@
 """Image upload routes for listings and profiles."""
 
-from flask import Blueprint, request, jsonify, current_app, send_from_directory, make_response
+from flask import Blueprint, request, jsonify, current_app, send_from_directory
 import os
 import uuid
 from werkzeug.utils import secure_filename
@@ -47,32 +47,10 @@ def get_upload_folder():
         os.makedirs(upload_folder)
     return upload_folder
 
-@uploads_bp.route('', methods=['POST', 'OPTIONS'])
-def upload_file_route():
+@uploads_bp.route('', methods=['POST'])
+@token_required
+def upload_file(current_user_id):
     """Upload an image file."""
-    # Handle CORS preflight
-    if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return response, 200
-    
-    # Require token for POST
-    token = request.headers.get('Authorization')
-    if not token:
-        return jsonify({'error': 'Token is missing'}), 401
-    
-    try:
-        token_value = token.split(' ')[1]
-        data = jwt.decode(token_value, SECRET_KEY, algorithms=['HS256'])
-        current_user_id = data['user_id']
-    except jwt.ExpiredSignatureError:
-        return jsonify({'error': 'Token has expired'}), 401
-    except Exception as e:
-        return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
-    
     try:
         # Check if file is in request
         if 'file' not in request.files:
@@ -107,7 +85,6 @@ def upload_file_route():
         file.save(filepath)
         
         # Return URL
-        # In production, this would be a CDN URL
         file_url = f"/api/uploads/{unique_filename}"
         
         return jsonify({
@@ -128,32 +105,10 @@ def get_file(filename):
     except Exception as e:
         return jsonify({'error': 'File not found'}), 404
 
-@uploads_bp.route('/<filename>', methods=['DELETE', 'OPTIONS'])
-def delete_file_route(filename):
+@uploads_bp.route('/<filename>', methods=['DELETE'])
+@token_required
+def delete_file(current_user_id, filename):
     """Delete an uploaded file."""
-    # Handle CORS preflight
-    if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Methods'] = 'DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return response, 200
-    
-    # Require token for DELETE
-    token = request.headers.get('Authorization')
-    if not token:
-        return jsonify({'error': 'Token is missing'}), 401
-    
-    try:
-        token_value = token.split(' ')[1]
-        data = jwt.decode(token_value, SECRET_KEY, algorithms=['HS256'])
-        current_user_id = data['user_id']
-    except jwt.ExpiredSignatureError:
-        return jsonify({'error': 'Token has expired'}), 401
-    except Exception as e:
-        return jsonify({'error': 'Token is invalid'}), 401
-    
     try:
         upload_folder = get_upload_folder()
         filepath = os.path.join(upload_folder, filename)
