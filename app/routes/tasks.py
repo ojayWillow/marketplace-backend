@@ -2,7 +2,7 @@
 
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models import TaskRequest, User
+from app.models import TaskRequest, User, TaskApplication
 from datetime import datetime
 from math import radians, sin, cos, sqrt, atan2
 from functools import wraps
@@ -240,9 +240,193 @@ def update_task(current_user_id, task_id):
         return jsonify({'error': str(e)}), 500
 
 
+# ============ NEW APPLICATION SYSTEM ENDPOINTS ============
+
+@tasks_bp.route('/<int:task_id>/apply', methods=['POST'])
+@token_required
+def apply_to_task(current_user_id, task_id):
+    """Apply to a task (worker submits application)."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        if task.status != 'open':
+            return jsonify({'error': 'Task is no longer accepting applications'}), 400
+        
+        # Can't apply to your own task
+        if task.creator_id == current_user_id:
+            return jsonify({'error': 'You cannot apply to your own task'}), 400
+        
+        # Check if already applied
+        existing_application = TaskApplication.query.filter_by(
+            task_id=task_id,
+            applicant_id=current_user_id
+        ).first()
+        
+        if existing_application:
+            return jsonify({'error': 'You have already applied to this task'}), 400
+        
+        data = request.get_json() or {}
+        message = data.get('message', '')
+        
+        application = TaskApplication(
+            task_id=task_id,
+            applicant_id=current_user_id,
+            message=message,
+            status='pending'
+        )
+        
+        db.session.add(application)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Application submitted successfully',
+            'application': application.to_dict()
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>/applications', methods=['GET'])
+@token_required
+def get_task_applications(current_user_id, task_id):
+    """Get all applications for a task (only task creator can view)."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can view applications
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can view applications'}), 403
+        
+        applications = TaskApplication.query.filter_by(task_id=task_id).order_by(TaskApplication.created_at.desc()).all()
+        
+        return jsonify({
+            'applications': [app.to_dict() for app in applications],
+            'total': len(applications)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>/applications/<int:application_id>/accept', methods=['POST'])
+@token_required
+def accept_application(current_user_id, task_id, application_id):
+    """Accept an application and assign task to applicant."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can accept applications
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can accept applications'}), 403
+        
+        if task.status != 'open':
+            return jsonify({'error': 'Task is no longer accepting applications'}), 400
+        
+        application = TaskApplication.query.get(application_id)
+        if not application or application.task_id != task_id:
+            return jsonify({'error': 'Application not found'}), 404
+        
+        if application.status != 'pending':
+            return jsonify({'error': 'Application has already been processed'}), 400
+        
+        # Accept the application
+        application.status = 'accepted'
+        
+        # Assign task to applicant
+        task.assigned_to_id = application.applicant_id
+        task.status = 'assigned'
+        task.updated_at = datetime.utcnow()
+        
+        # Reject all other pending applications for this task
+        other_applications = TaskApplication.query.filter(
+            TaskApplication.task_id == task_id,
+            TaskApplication.id != application_id,
+            TaskApplication.status == 'pending'
+        ).all()
+        
+        for other_app in other_applications:
+            other_app.status = 'rejected'
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Application accepted and task assigned',
+            'task': task.to_dict(),
+            'application': application.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>/applications/<int:application_id>/reject', methods=['POST'])
+@token_required
+def reject_application(current_user_id, task_id, application_id):
+    """Reject an application."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can reject applications
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can reject applications'}), 403
+        
+        application = TaskApplication.query.get(application_id)
+        if not application or application.task_id != task_id:
+            return jsonify({'error': 'Application not found'}), 404
+        
+        if application.status != 'pending':
+            return jsonify({'error': 'Application has already been processed'}), 400
+        
+        application.status = 'rejected'
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Application rejected',
+            'application': application.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/my-applications', methods=['GET'])
+@token_required
+def get_my_applications(current_user_id):
+    """Get all applications submitted by current user."""
+    try:
+        applications = TaskApplication.query.filter_by(
+            applicant_id=current_user_id
+        ).order_by(TaskApplication.created_at.desc()).all()
+        
+        results = []
+        for app in applications:
+            app_dict = app.to_dict()
+            # Include task info
+            if app.task:
+                app_dict['task'] = app.task.to_dict()
+            results.append(app_dict)
+        
+        return jsonify({
+            'applications': results,
+            'total': len(results)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ============ END APPLICATION SYSTEM ENDPOINTS ============
+
+
 @tasks_bp.route('/<int:task_id>/accept', methods=['POST'])
 def accept_task(task_id):
-    """Accept and assign task to a user."""
+    """DEPRECATED: Old direct accept endpoint - kept for backward compatibility."""
     try:
         task = TaskRequest.query.get(task_id)
         if not task:
