@@ -16,11 +16,21 @@ class TaskApplication(db.Model):
     applicant = db.relationship('User', backref='task_applications')
     
     def to_dict(self):
+        # Build applicant name from first_name and last_name
+        applicant_name = 'Unknown'
+        if self.applicant:
+            if self.applicant.first_name and self.applicant.last_name:
+                applicant_name = f"{self.applicant.first_name} {self.applicant.last_name}"
+            elif self.applicant.first_name:
+                applicant_name = self.applicant.first_name
+            elif self.applicant.username:
+                applicant_name = self.applicant.username
+        
         return {
             'id': self.id,
             'task_id': self.task_id,
             'applicant_id': self.applicant_id,
-            'applicant_name': self.applicant.full_name if self.applicant else 'Unknown',
+            'applicant_name': applicant_name,
             'applicant_email': self.applicant.email if self.applicant else None,
             'message': self.message,
             'status': self.status,
