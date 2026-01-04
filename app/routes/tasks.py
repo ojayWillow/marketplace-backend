@@ -11,8 +11,8 @@ import os
 
 tasks_bp = Blueprint('tasks', __name__)
 
-# Use same SECRET_KEY as auth.py
-SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+# IMPORTANT: Use JWT_SECRET_KEY consistently with auth.py
+SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 
 def token_required(f):
