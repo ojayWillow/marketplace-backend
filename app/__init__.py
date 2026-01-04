@@ -31,9 +31,14 @@ def create_app(config_name='development'):
     db.init_app(app)
     jwt.init_app(app)
     
-    # Simple permissive CORS for development
+    # CORS configuration - allow both Vite dev server ports
     CORS(app, 
-         origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+         origins=[
+             "http://localhost:3000",
+             "http://127.0.0.1:3000",
+             "http://localhost:5173",  # Vite default port
+             "http://127.0.0.1:5173"   # Vite default port
+         ],
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization", "Accept"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
