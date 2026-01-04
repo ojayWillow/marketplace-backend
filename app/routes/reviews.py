@@ -9,13 +9,14 @@ import os
 from datetime import datetime
 
 reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
-SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+# Use JWT_SECRET_KEY to match auth routes
+SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 # JWT token verification
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-                # Skip authentication in testing mode
+        # Skip authentication in testing mode
         if current_app.config.get('TESTING'):
             # In test mode, set current_user_id from request headers or default to 1
             current_user_id = 1  # Default test user
@@ -79,18 +80,23 @@ def create_review(current_user_id):
         if not (1 <= data['rating'] <= 5):
             return jsonify({'error': 'Rating must be between 1 and 5'}), 400
         
+        # Don't allow reviewing yourself
+        if current_user_id == data['reviewed_user_id']:
+            return jsonify({'error': 'You cannot review yourself'}), 400
+        
         review = Review(
             reviewer_id=current_user_id,
             reviewed_user_id=data['reviewed_user_id'],
             rating=data['rating'],
-                        content=data.get('comment'),           listing_id=data.get('listing_id'),
+            content=data.get('content'),  # Changed from 'comment' to 'content'
+            listing_id=data.get('listing_id'),
             task_id=data.get('task_id')
         )
         
         db.session.add(review)
         db.session.commit()
         
-        return jsonify({'message': 'Review created successfully', 'review': review.to_dict()}), 201
+        return jsonify({'message': 'Review created successfully', 'review': review.to_dict(), 'id': review.id}), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
@@ -126,9 +132,10 @@ def update_review(current_user_id, review_id):
                 return jsonify({'error': 'Rating must be between 1 and 5'}), 400
             review.rating = data['rating']
         
-        if 'comment' in data:
-            review.content = data['comment'] 
-            review.updated_at = datetime.utcnow()
+        if 'content' in data:
+            review.content = data['content']
+        
+        review.updated_at = datetime.utcnow()
         db.session.commit()
         
         return jsonify({'message': 'Review updated', 'review': review.to_dict()}), 200
