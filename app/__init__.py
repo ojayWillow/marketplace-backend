@@ -31,23 +31,17 @@ def create_app(config_name='development'):
     db.init_app(app)
     jwt.init_app(app)
     
-    # Simple permissive CORS for development - allow all origins
-    CORS(app, supports_credentials=True)
+    # Simple permissive CORS for development
+    CORS(app, 
+         origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+         supports_credentials=True,
+         allow_headers=["Content-Type", "Authorization", "Accept"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
     
     # Health check route
     @app.route('/health', methods=['GET'])
     def health():
         return jsonify({'status': 'ok'}), 200
-    
-    # Add CORS headers to all responses (backup)
-    @app.after_request
-    def after_request(response):
-        origin = response.headers.get('Origin', '*')
-        response.headers.add('Access-Control-Allow-Origin', origin if origin else '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        return response
     
     # Register blueprints
     try:
