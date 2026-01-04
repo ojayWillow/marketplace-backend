@@ -84,7 +84,7 @@ def get_my_listings(current_user_id):
 
 @listings_bp.route('/<int:listing_id>', methods=['GET'])
 def get_listing(listing_id):
-    """Get a specific listing by ID."""
+    """Get a specific listing by ID with seller details."""
     try:
         listing = Listing.query.get(listing_id)
         if not listing:
@@ -93,7 +93,8 @@ def get_listing(listing_id):
         listing.views_count += 1
         db.session.commit()
         
-        return jsonify(listing.to_dict()), 200
+        # Include seller details for individual listing view
+        return jsonify(listing.to_dict(include_seller_details=True)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -118,7 +119,9 @@ def create_listing(current_user_id):
             latitude=data.get('latitude'),
             longitude=data.get('longitude'),
             images=data.get('images'),
-            contact_info=data.get('contact_info')
+            contact_info=data.get('contact_info'),
+            condition=data.get('condition'),
+            is_negotiable=data.get('is_negotiable', False)
         )
         
         db.session.add(listing)
