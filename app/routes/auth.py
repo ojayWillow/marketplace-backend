@@ -9,7 +9,9 @@ import jwt
 from functools import wraps
 
 auth_bp = Blueprint('auth', __name__)
-SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+
+# Use JWT_SECRET_KEY consistently across all routes
+SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 
 def token_required(f):
