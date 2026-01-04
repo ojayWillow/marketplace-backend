@@ -179,6 +179,67 @@ def create_task():
         return jsonify({'error': str(e)}), 500
 
 
+@tasks_bp.route('/<int:task_id>', methods=['PUT'])
+@token_required
+def update_task(current_user_id, task_id):
+    """Update an existing task (only creator can update, only if status is 'open')."""
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Only the creator can update
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can update this task'}), 403
+        
+        # Can only update open tasks
+        if task.status != 'open':
+            return jsonify({'error': 'Only open tasks can be edited'}), 400
+        
+        data = request.get_json()
+        
+        # Update allowed fields
+        if 'title' in data:
+            task.title = data['title']
+        if 'description' in data:
+            task.description = data['description']
+        if 'category' in data:
+            task.category = data['category']
+        if 'location' in data:
+            task.location = data['location']
+        if 'latitude' in data:
+            task.latitude = data['latitude']
+        if 'longitude' in data:
+            task.longitude = data['longitude']
+        if 'budget' in data:
+            task.budget = data['budget']
+        if 'priority' in data:
+            task.priority = data['priority']
+        if 'is_urgent' in data:
+            task.is_urgent = data['is_urgent']
+        
+        # Parse deadline if provided
+        if 'deadline' in data:
+            if data['deadline']:
+                try:
+                    task.deadline = datetime.fromisoformat(data['deadline'])
+                except ValueError:
+                    return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
+            else:
+                task.deadline = None
+        
+        task.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Task updated successfully',
+            'task': task.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
 @tasks_bp.route('/<int:task_id>/accept', methods=['POST'])
 def accept_task(task_id):
     """Accept and assign task to a user."""
