@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 import os
@@ -8,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 db = SQLAlchemy()
+migrate = Migrate()
 jwt = JWTManager()
 
 def create_app(config_name='development'):
@@ -29,6 +31,7 @@ def create_app(config_name='development'):
     
     # Initialize extensions
     db.init_app(app)
+    migrate.init_app(app, db)
     jwt.init_app(app)
     
     # CORS configuration - allow both Vite dev server ports
