@@ -1,6 +1,6 @@
 # Marketplace Backend - Complete Development Roadmap
 
-**Last Updated**: January 4, 2026
+**Last Updated**: January 4, 2026, 8:07 PM EET
 
 ## Project Overview
 A Flask-based REST API for a dual-segment marketplace:
@@ -50,11 +50,11 @@ A Flask-based REST API for a dual-segment marketplace:
 - [x] Flask app initialization (`app/__init__.py`)
 - [x] SQLite database setup for local development
 - [x] PostgreSQL configuration for production
-- [x] CORS enabled for frontend integration
+- [x] CORS enabled for frontend integration (ports 3000 & 5173)
 - [x] Entry point (wsgi.py)
 
 ### 1.4 Documentation
-- [x] PROJECT_STATUS.md
+- [x] DEVELOPMENT_ROADMAP.md
 - [x] README.md  
 - [x] API_TESTING_GUIDE.md
 - [x] Code comments in modules
@@ -63,6 +63,8 @@ A Flask-based REST API for a dual-segment marketplace:
 - [x] Fixed indentation errors in all models
 - [x] Fixed syntax errors in __init__.py
 - [x] Verified all imports work correctly
+- [x] Fixed CORS for Vite dev server (port 5173)
+- [x] Fixed JWT secret key consistency across routes
 
 ---
 
@@ -77,14 +79,18 @@ A Flask-based REST API for a dual-segment marketplace:
 | `/api/auth/login` | POST | ✅ DONE | JWT token generation |
 | `/api/auth/profile` | GET | ✅ DONE | Get authenticated user profile |
 | `/api/auth/profile` | PUT | ✅ DONE | Update user profile info |
+| `/api/auth/users/<id>` | GET | ✅ DONE | Get public user profile |
+| `/api/auth/users/<id>/reviews` | GET | ✅ DONE | Get user's reviews |
 | `/api/auth/logout` | POST | ⬜ TODO | Token invalidation (optional for MVP) |
 | `/api/auth/refresh-token` | POST | ⬜ TODO | Refresh JWT token (optional for MVP) |
 
 **Completed:**
 - [x] Password hashing (werkzeug.security)
-- [x] JWT token generation & verification (flask-jwt-extended)
-- [x] Authentication middleware decorator (@jwt_required)
+- [x] JWT token generation & verification (PyJWT)
+- [x] Authentication middleware decorator (@token_required)
 - [x] Error handling & response formatting
+- [x] Public user profile endpoints
+- [x] User review aggregation
 
 ---
 
@@ -107,6 +113,7 @@ A Flask-based REST API for a dual-segment marketplace:
 - [x] Pagination (page, per_page)
 - [x] Filtering (category, status)
 - [x] User's own listings endpoint
+- [x] Seller info inclusion in listing responses
 
 ---
 
@@ -134,7 +141,7 @@ A Flask-based REST API for a dual-segment marketplace:
 - [x] Complete task workflow (open → assigned → pending_confirmation → completed)
 - [x] Task acceptance by workers
 - [x] Mark done / confirm / dispute flow
-- [x] Status transitions
+- [x] Status transitions with validation
 
 ---
 
@@ -148,11 +155,32 @@ A Flask-based REST API for a dual-segment marketplace:
 | `/api/reviews/<id>` | GET | ✅ DONE | Get review details |
 | `/api/reviews/<id>` | PUT | ✅ DONE | Update review |
 | `/api/reviews/<id>` | DELETE | ✅ DONE | Delete review |
-| `/api/users/<id>/reviews` | GET | ✅ DONE | Get all reviews for a user |
+
+**Recent Fixes:**
+- [x] Fixed JWT_SECRET_KEY consistency with auth routes
+- [x] Fixed content field mapping (was 'comment')
+- [x] Added self-review prevention
+- [x] Proper authorization checks
 
 ---
 
-### 2.5 Health & Status Routes
+### 2.5 Uploads Routes (`app/routes/uploads.py`)
+**Status: ✅ BASIC IMPLEMENTATION**
+
+| Endpoint | Method | Status | Notes |
+|----------|--------|--------|-------|
+| `/api/uploads/image` | POST | ✅ DONE | Upload single image |
+| `/api/uploads/<filename>` | GET | ✅ DONE | Serve uploaded files |
+
+**Completed:**
+- [x] File upload with validation (type, size)
+- [x] Unique filename generation
+- [x] File storage in uploads/ folder
+- [x] Static file serving
+
+---
+
+### 2.6 Health & Status Routes
 **Status: ✅ COMPLETED**
 
 | Endpoint | Method | Status | Notes |
@@ -161,10 +189,10 @@ A Flask-based REST API for a dual-segment marketplace:
 
 ---
 
-## ✅ PHASE 3: CROSS-CUTTING CONCERNS (MOSTLY COMPLETED)
+## ✅ PHASE 3: CROSS-CUTTING CONCERNS (COMPLETED)
 
 ### 3.1 Input Validation & Error Handling
-**Status: ✅ BASIC IMPLEMENTATION DONE**
+**Status: ✅ IMPLEMENTATION DONE**
 
 | Component | Status | Details |
 |-----------|--------|--------|
@@ -180,10 +208,11 @@ A Flask-based REST API for a dual-segment marketplace:
 
 | Component | Status | Details |
 |-----------|--------|--------|
-| JWT tokens | ✅ DONE | flask-jwt-extended |
+| JWT tokens | ✅ DONE | PyJWT library |
 | Password hashing | ✅ DONE | werkzeug.security |
-| Authentication decorator | ✅ DONE | @jwt_required() |
+| Authentication decorator | ✅ DONE | @token_required |
 | Permission checks | ✅ DONE | Users can only modify own resources |
+| Consistent secret keys | ✅ DONE | JWT_SECRET_KEY across all routes |
 
 ---
 
@@ -198,7 +227,18 @@ A Flask-based REST API for a dual-segment marketplace:
 
 ---
 
-### 3.4 Pagination & Filtering
+### 3.4 CORS Configuration
+**Status: ✅ COMPLETED**
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| CORS setup | ✅ DONE | Flask-CORS enabled |
+| Multiple origins | ✅ DONE | Supports ports 3000 & 5173 |
+| Credentials support | ✅ DONE | Headers, methods configured |
+
+---
+
+### 3.5 Pagination & Filtering
 **Status: ✅ COMPLETED**
 
 | Component | Status | Notes |
@@ -209,7 +249,7 @@ A Flask-based REST API for a dual-segment marketplace:
 
 ---
 
-## 🔲 PHASE 4: TESTING & QUALITY ASSURANCE (FUTURE)
+## ⬜ PHASE 4: TESTING & QUALITY ASSURANCE (FUTURE)
 
 ### 4.1 Testing
 **Status: ⬜ NOT STARTED (Not critical for MVP)**
@@ -222,20 +262,27 @@ A Flask-based REST API for a dual-segment marketplace:
 
 ---
 
-## 🔲 PHASE 5: ENHANCED FEATURES (FUTURE)
+## ⬜ PHASE 5: ENHANCED FEATURES (FUTURE)
 
 ### 5.1 Image Management
-- [ ] Image upload to cloud storage
+- [ ] Image upload to cloud storage (AWS S3)
 - [ ] Image resizing & optimization
+- [ ] Multiple image handling per listing
 
 ### 5.2 Notifications & Messaging
 - [ ] Email notifications
 - [ ] In-app notifications
-- [ ] Real-time messaging
+- [ ] Real-time messaging (WebSocket)
 
 ### 5.3 Payments & Stripe Integration
 - [ ] Payment processing
 - [ ] Escrow for tasks
+- [ ] Payout management
+
+### 5.4 Admin Features
+- [ ] Admin dashboard
+- [ ] User management
+- [ ] Content moderation
 
 ---
 
@@ -244,47 +291,173 @@ A Flask-based REST API for a dual-segment marketplace:
 | Phase | Status | Completion |
 |-------|--------|------------|
 | 1. Foundation & Setup | ✅ Complete | 100% |
-| 2. API Routes | ✅ Complete | 95% |
-| 3. Cross-cutting Concerns | ✅ Complete | 85% |
+| 2. API Routes | ✅ Complete | 100% |
+| 3. Cross-cutting Concerns | ✅ Complete | 100% |
 | 4. Testing | ⬜ Not Started | 0% |
 | 5. Enhanced Features | ⬜ Not Started | 0% |
 
-**Overall MVP Status: ~90% Complete** 🎉
+**Overall MVP Status: ~95% Complete** 🎉
 
 ---
 
-## What's Working (January 4, 2026)
+## What's Fully Working (January 4, 2026)
+
+### Authentication ✅
+- User registration with validation
+- User login with JWT tokens
+- Profile viewing and editing
+- Public user profile endpoints
+- User review aggregation
+- Consistent JWT secret across all routes
+
+### Classifieds (Buy/Sell) ✅
+- Create, read, update, delete listings
+- Browse listings with pagination
+- Filter by category and status
+- Seller info included in responses
+- Image upload support
+
+### Quick Help (Tasks) ✅
+- Create tasks with location
+- Browse tasks by location (radius search)
+- Accept tasks as worker
+- Mark task as done (worker)
+- Confirm completion (creator)
+- Dispute task (creator)
+- View my assigned tasks
+- View my created tasks
+- Complete status workflow
+
+### Reviews ✅
+- Create reviews for users
+- Edit own reviews
+- Delete own reviews
+- View user reviews
+- Aggregate ratings
+- Self-review prevention
+
+### Infrastructure ✅
+- CORS configured for Vite (5173) and React (3000)
+- JWT authentication working across all routes
+- File uploads working
+- Consistent error handling
+
+---
+
+## Recent Session (January 4, 2026, 8:00 PM)
+
+### ✅ Fixes & Improvements:
+
+1. **CORS Configuration**
+   - Added port 5173 (Vite default) to allowed origins
+   - Maintained port 3000 support
+   - Fixed preflight OPTIONS requests
+
+2. **Reviews System**
+   - Fixed JWT_SECRET_KEY consistency (was using SECRET_KEY)
+   - Changed 'comment' field to 'content' for consistency
+   - Added self-review prevention
+   - Fixed token validation across routes
+
+3. **User Profile Endpoints**
+   - Public user profiles working at `/api/auth/users/:id`
+   - User reviews endpoint functional
+   - Rating aggregation working
+
+4. **Bug Fixes**
+   - Fixed 404 errors on user profile endpoints
+   - Fixed token validation failures
+   - Fixed field name mismatches
+
+### 🎯 Current Status:
+- **All Core APIs**: ✅ Working
+- **Reviews System**: ✅ Complete
+- **User Profiles**: ✅ Complete
+- **MVP Backend**: 95% Complete
+
+---
+
+## API Endpoints Summary
 
 ### Authentication
-- ✅ User registration
-- ✅ User login with JWT
-- ✅ Profile viewing and editing
+- `POST /api/auth/register` - Register new user
+- `POST /api/auth/login` - Login & get JWT token
+- `GET /api/auth/profile` - Get own profile
+- `PUT /api/auth/profile` - Update own profile
+- `GET /api/auth/users/:id` - Get public user profile
+- `GET /api/auth/users/:id/reviews` - Get user reviews
 
-### Classifieds (Buy/Sell)
-- ✅ Create, read, update, delete listings
-- ✅ Browse listings with pagination
-- ✅ Filter by category
+### Listings
+- `GET /api/listings` - Browse listings
+- `POST /api/listings` - Create listing
+- `GET /api/listings/:id` - Get listing details
+- `PUT /api/listings/:id` - Update listing
+- `DELETE /api/listings/:id` - Delete listing
 
-### Quick Help (Tasks)
-- ✅ Create tasks with location
-- ✅ Browse tasks by location (radius search)
-- ✅ Accept tasks as worker
-- ✅ Mark task as done (worker)
-- ✅ Confirm completion (creator)
-- ✅ Dispute task (creator)
-- ✅ View my assigned tasks
-- ✅ View my created tasks
+### Tasks
+- `GET /api/tasks` - Browse tasks
+- `POST /api/tasks` - Create task
+- `GET /api/tasks/:id` - Get task details
+- `PUT /api/tasks/:id` - Update task
+- `DELETE /api/tasks/:id` - Delete task
+- `POST /api/tasks/:id/accept` - Accept task
+- `POST /api/tasks/:id/done` - Mark done
+- `POST /api/tasks/:id/confirm` - Confirm completion
+- `POST /api/tasks/:id/dispute` - Dispute
+- `GET /api/tasks/my` - My assigned tasks
+- `GET /api/tasks/created` - My created tasks
 
 ### Reviews
-- ✅ Create reviews for users
-- ✅ View reviews
+- `GET /api/reviews` - Browse reviews
+- `POST /api/reviews` - Create review
+- `GET /api/reviews/:id` - Get review
+- `PUT /api/reviews/:id` - Update review
+- `DELETE /api/reviews/:id` - Delete review
+
+### Uploads
+- `POST /api/uploads/image` - Upload image
+- `GET /api/uploads/:filename` - Get uploaded file
 
 ---
 
 ## Next Steps (Post-MVP)
 
-1. **Image uploads** - Allow photos for listings and profiles
+1. **Testing** - Unit and integration tests
 2. **Email notifications** - Task updates, new messages
-3. **Messaging system** - Chat between users
+3. **Messaging system** - Real-time chat between users
 4. **Payment integration** - Stripe for task payments
-5. **Admin dashboard** - Manage users, listings, tasks
+5. **Admin dashboard** - User and content management
+6. **Cloud storage** - Move uploads to AWS S3
+7. **Database migrations** - Flask-Migrate setup
+
+---
+
+## How to Run
+
+```bash
+cd marketplace-backend
+
+# Create virtual environment
+python -m venv venv
+
+# Activate (Windows)
+venv\Scripts\activate
+
+# Activate (Mac/Linux)
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run server
+python wsgi.py
+# Server runs at http://localhost:5000
+```
+
+---
+
+## Documentation Status
+
+✅ **Up to date** - Last updated: January 4, 2026, 8:07 PM EET
+
+**Note**: Taking a break to review and plan next steps. All core APIs are working and tested with frontend. Ready for polish and enhancement phase when resuming development.
