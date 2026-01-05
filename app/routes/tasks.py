@@ -70,15 +70,26 @@ def get_my_tasks(current_user_id):
 @tasks_bp.route('/created', methods=['GET'])
 @token_required
 def get_created_tasks(current_user_id):
-    """Get tasks created by the current user (as client)."""
+    """Get tasks created by the current user (as client), with pending applications count."""
     try:
         created_tasks = TaskRequest.query.filter(
             TaskRequest.creator_id == current_user_id
         ).order_by(TaskRequest.created_at.desc()).all()
         
+        results = []
+        for task in created_tasks:
+            task_dict = task.to_dict()
+            # Count pending applications for each task
+            pending_count = TaskApplication.query.filter_by(
+                task_id=task.id,
+                status='pending'
+            ).count()
+            task_dict['pending_applications_count'] = pending_count
+            results.append(task_dict)
+        
         return jsonify({
-            'tasks': [task.to_dict() for task in created_tasks],
-            'total': len(created_tasks)
+            'tasks': results,
+            'total': len(results)
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
