@@ -49,6 +49,42 @@ def distance(lat1, lon1, lat2, lon2):
     return R * c
 
 
+@tasks_bp.route('/notifications', methods=['GET'])
+@token_required
+def get_task_notifications(current_user_id):
+    """Get notification counts for the current user (pending applications on their tasks)."""
+    try:
+        # Count pending applications on tasks created by current user
+        pending_applications_count = db.session.query(TaskApplication).join(
+            TaskRequest, TaskApplication.task_id == TaskRequest.id
+        ).filter(
+            TaskRequest.creator_id == current_user_id,
+            TaskRequest.status == 'open',
+            TaskApplication.status == 'pending'
+        ).count()
+        
+        # Count tasks awaiting confirmation (worker marked done, creator needs to confirm)
+        pending_confirmation_count = TaskRequest.query.filter(
+            TaskRequest.creator_id == current_user_id,
+            TaskRequest.status == 'pending_confirmation'
+        ).count()
+        
+        # Count accepted applications for tasks user applied to (good news!)
+        accepted_applications_count = TaskApplication.query.filter(
+            TaskApplication.applicant_id == current_user_id,
+            TaskApplication.status == 'accepted'
+        ).count()
+        
+        return jsonify({
+            'pending_applications': pending_applications_count,
+            'pending_confirmation': pending_confirmation_count,
+            'accepted_applications': accepted_applications_count,
+            'total': pending_applications_count + pending_confirmation_count
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @tasks_bp.route('/my', methods=['GET'])
 @token_required
 def get_my_tasks(current_user_id):
