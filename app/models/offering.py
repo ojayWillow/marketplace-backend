@@ -50,10 +50,11 @@ class Offering(db.Model):
                     creator_name = f"{creator.first_name} {creator.last_name}"
                 else:
                     creator_name = creator.username
-                creator_avatar = creator.avatar
-                creator_rating = creator.rating
-                creator_review_count = creator.review_count or 0
-                creator_completed_tasks = creator.completed_tasks or 0
+                # Use correct field names from User model
+                creator_avatar = creator.avatar_url or creator.profile_picture_url
+                creator_rating = creator.reputation_score or 0
+                creator_review_count = 0  # User model doesn't have review_count
+                creator_completed_tasks = int(creator.completion_rate) if creator.completion_rate else 0
         
         return {
             'id': self.id,
