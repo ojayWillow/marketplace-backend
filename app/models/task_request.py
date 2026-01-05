@@ -32,9 +32,28 @@ class TaskRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
+    # Relationships
+    creator = db.relationship('User', foreign_keys=[creator_id], backref='created_tasks_rel')
+    assigned_to = db.relationship('User', foreign_keys=[assigned_to_id], backref='assigned_tasks_rel')
     
     def to_dict(self):
         """Convert task request to dictionary."""
+        # Get creator name
+        creator_name = None
+        if self.creator:
+            if self.creator.first_name and self.creator.last_name:
+                creator_name = f"{self.creator.first_name} {self.creator.last_name}"
+            else:
+                creator_name = self.creator.username
+        
+        # Get assigned user name
+        assigned_to_name = None
+        if self.assigned_to:
+            if self.assigned_to.first_name and self.assigned_to.last_name:
+                assigned_to_name = f"{self.assigned_to.first_name} {self.assigned_to.last_name}"
+            else:
+                assigned_to_name = self.assigned_to.username
+        
         return {
             'id': self.id,
             'title': self.title,
@@ -46,7 +65,9 @@ class TaskRequest(db.Model):
             'latitude': self.latitude,
             'longitude': self.longitude,
             'creator_id': self.creator_id,
+            'creator_name': creator_name,
             'assigned_to_id': self.assigned_to_id,
+            'assigned_to_name': assigned_to_name,
             'radius': self.radius,
             'required_skills': self.required_skills,
             'images': self.images,
