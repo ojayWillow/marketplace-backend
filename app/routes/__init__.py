@@ -12,6 +12,7 @@ def register_routes(app):
     from .uploads import uploads_bp
     from .messages import messages_bp
     from .helpers import helpers_bp
+    from .offerings import offerings_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(listings_bp, url_prefix='/api/listings')
@@ -21,3 +22,4 @@ def register_routes(app):
     app.register_blueprint(uploads_bp, url_prefix='/api/uploads')
     app.register_blueprint(messages_bp, url_prefix='/api/messages')
     app.register_blueprint(helpers_bp, url_prefix='/api/helpers')
+    app.register_blueprint(offerings_bp, url_prefix='/api/offerings')
