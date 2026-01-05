@@ -31,10 +31,19 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
+    # Helper-specific fields
+    is_helper = db.Column(db.Boolean, default=False, nullable=False)  # User is available to help
+    skills = db.Column(db.Text, nullable=True)  # Comma-separated list of skills
+    helper_categories = db.Column(db.Text, nullable=True)  # Comma-separated categories they help with
+    hourly_rate = db.Column(db.Float, nullable=True)  # Optional hourly rate
+    latitude = db.Column(db.Float, nullable=True)  # User's location latitude
+    longitude = db.Column(db.Float, nullable=True)  # User's location longitude
+    
     # Relationships
     listings = db.relationship('Listing', backref='seller', lazy=True, foreign_keys='Listing.seller_id')
     task_requests = db.relationship('TaskRequest', backref='creator', lazy=True, foreign_keys='TaskRequest.creator_id')
     assigned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy=True, foreign_keys='TaskRequest.assigned_to_id')
+    
     def set_password(self, password):
         """Hash and set the user password."""
         self.password_hash = generate_password_hash(password)
@@ -59,10 +68,16 @@ class User(db.Model):
             'is_active': self.is_active,
             'is_verified': self.is_verified,
             'user_type': self.user_type,
-                        'profile_picture_url': self.profile_picture_url,
-                        'phone_verified': self.phone_verified,
-                        'reputation_score': self.reputation_score,
-                        'completion_rate': self.completion_rate,
+            'profile_picture_url': self.profile_picture_url,
+            'phone_verified': self.phone_verified,
+            'reputation_score': self.reputation_score,
+            'completion_rate': self.completion_rate,
+            'is_helper': self.is_helper,
+            'skills': self.skills,
+            'helper_categories': self.helper_categories,
+            'hourly_rate': self.hourly_rate,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
