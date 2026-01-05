@@ -11,6 +11,7 @@ def register_routes(app):
     from .task_responses import task_responses_bp
     from .uploads import uploads_bp
     from .messages import messages_bp
+    from .helpers import helpers_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(listings_bp, url_prefix='/api/listings')
@@ -19,3 +20,4 @@ def register_routes(app):
     app.register_blueprint(task_responses_bp, url_prefix='/api/task_responses')
     app.register_blueprint(uploads_bp, url_prefix='/api/uploads')
     app.register_blueprint(messages_bp, url_prefix='/api/messages')
+    app.register_blueprint(helpers_bp, url_prefix='/api/helpers')
