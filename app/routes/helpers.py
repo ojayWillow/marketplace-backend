@@ -2,7 +2,7 @@
 
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models import User, Review, Task
+from app.models import User, Review, TaskRequest
 from sqlalchemy import func, and_
 import math
 
@@ -52,11 +52,11 @@ def get_helpers():
         
         # Subquery to count completed tasks for each user
         completed_tasks_subq = db.session.query(
-            Task.assigned_to_id,
-            func.count(Task.id).label('completed_count')
+            TaskRequest.assigned_to_id,
+            func.count(TaskRequest.id).label('completed_count')
         ).filter(
-            Task.status == 'completed'
-        ).group_by(Task.assigned_to_id).subquery()
+            TaskRequest.status == 'completed'
+        ).group_by(TaskRequest.assigned_to_id).subquery()
         
         # Query users
         query = db.session.query(
@@ -110,9 +110,9 @@ def get_helpers():
                 'review_count': len(reviews),
                 'completed_tasks': completed_count or 0,
                 'skills': user.skills.split(',') if user.skills else [],
-                'categories': user.helper_categories.split(',') if hasattr(user, 'helper_categories') and user.helper_categories else [],
-                'hourly_rate': user.hourly_rate if hasattr(user, 'hourly_rate') else None,
-                'is_available': user.is_helper if hasattr(user, 'is_helper') else True,
+                'categories': user.helper_categories.split(',') if user.helper_categories else [],
+                'hourly_rate': user.hourly_rate,
+                'is_available': user.is_helper,
                 'member_since': user.created_at.isoformat() if user.created_at else None,
                 'distance': round(distance, 1) if distance is not None else None
             }
@@ -121,7 +121,7 @@ def get_helpers():
         
         # Sort by distance if coordinates provided, otherwise by rating
         if latitude and longitude:
-            helpers.sort(key=lambda h: (h['distance'] or float('inf'), -h['rating']))
+            helpers.sort(key=lambda h: (h['distance'] if h['distance'] is not None else float('inf'), -h['rating']))
         else:
             helpers.sort(key=lambda h: (-h['rating'], -h['completed_tasks']))
         
