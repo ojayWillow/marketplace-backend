@@ -363,8 +363,8 @@ def contact_offering_creator(offering_id):
         
         # Check for existing conversation
         existing_conv = Conversation.query.filter(
-            ((Conversation.participant1_id == g.current_user.id) & (Conversation.participant2_id == offering.creator_id)) |
-            ((Conversation.participant1_id == offering.creator_id) & (Conversation.participant2_id == g.current_user.id))
+            ((Conversation.participant_1_id == g.current_user.id) & (Conversation.participant_2_id == offering.creator_id)) |
+            ((Conversation.participant_1_id == offering.creator_id) & (Conversation.participant_2_id == g.current_user.id))
         ).first()
         
         if existing_conv:
@@ -372,8 +372,8 @@ def contact_offering_creator(offering_id):
         else:
             # Create new conversation
             conversation = Conversation(
-                participant1_id=g.current_user.id,
-                participant2_id=offering.creator_id,
+                participant_1_id=g.current_user.id,
+                participant_2_id=offering.creator_id,
                 offering_id=offering.id
             )
             db.session.add(conversation)
