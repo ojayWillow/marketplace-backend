@@ -52,11 +52,11 @@ def distance(lat1, lon1, lat2, lon2):
 @tasks_bp.route('/my', methods=['GET'])
 @token_required
 def get_my_tasks(current_user_id):
-    """Get tasks assigned to the current user (as worker)."""
+    """Get tasks assigned to the current user (as worker), including completed ones."""
     try:
         my_tasks = TaskRequest.query.filter(
             TaskRequest.assigned_to_id == current_user_id,
-            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation'])
+            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation', 'completed'])
         ).order_by(TaskRequest.created_at.desc()).all()
         
         return jsonify({
