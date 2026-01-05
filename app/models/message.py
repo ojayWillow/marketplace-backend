@@ -13,6 +13,7 @@ class Conversation(db.Model):
     participant_1_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     participant_2_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     task_id = db.Column(db.Integer, db.ForeignKey('task_requests.id'), nullable=True, index=True)
+    offering_id = db.Column(db.Integer, db.ForeignKey('offerings.id'), nullable=True, index=True)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -22,6 +23,7 @@ class Conversation(db.Model):
     participant_1 = db.relationship('User', foreign_keys=[participant_1_id], backref='conversations_as_p1')
     participant_2 = db.relationship('User', foreign_keys=[participant_2_id], backref='conversations_as_p2')
     task = db.relationship('TaskRequest', backref='conversations')
+    offering = db.relationship('Offering', backref='conversations')
     messages = db.relationship('Message', backref='conversation', lazy='dynamic', order_by='Message.created_at')
     
     def get_other_participant(self, user_id):
@@ -66,6 +68,7 @@ class Conversation(db.Model):
             'participant_1_id': self.participant_1_id,
             'participant_2_id': self.participant_2_id,
             'task_id': self.task_id,
+            'offering_id': self.offering_id,
             'other_participant': other_participant,
             'unread_count': unread_count,
             'last_message': last_message.to_dict() if last_message else None,
