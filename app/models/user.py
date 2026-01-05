@@ -31,8 +31,8 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
-    # Helper-specific fields
-    is_helper = db.Column(db.Boolean, default=False, nullable=False)  # User is available to help
+    # Helper-specific fields (all nullable for SQLite compatibility)
+    is_helper = db.Column(db.Boolean, default=False, nullable=True)  # User is available to help
     skills = db.Column(db.Text, nullable=True)  # Comma-separated list of skills
     helper_categories = db.Column(db.Text, nullable=True)  # Comma-separated categories they help with
     hourly_rate = db.Column(db.Float, nullable=True)  # Optional hourly rate
@@ -72,7 +72,7 @@ class User(db.Model):
             'phone_verified': self.phone_verified,
             'reputation_score': self.reputation_score,
             'completion_rate': self.completion_rate,
-            'is_helper': self.is_helper,
+            'is_helper': self.is_helper or False,
             'skills': self.skills,
             'helper_categories': self.helper_categories,
             'hourly_rate': self.hourly_rate,
