@@ -41,13 +41,18 @@ class TaskApplication(db.Model):
             from app.models.review import Review
             review_count = Review.query.filter_by(reviewee_id=self.applicant_id).count()
         
+        # Get avatar URL safely
+        applicant_avatar = None
+        if self.applicant:
+            applicant_avatar = self.applicant.profile_picture_url or self.applicant.avatar_url
+        
         return {
             'id': self.id,
             'task_id': self.task_id,
             'applicant_id': self.applicant_id,
             'applicant_name': applicant_name,
             'applicant_email': self.applicant.email if self.applicant else None,
-            'applicant_avatar': self.applicant.profile_picture_url or self.applicant.avatar_url if self.applicant else None,
+            'applicant_avatar': applicant_avatar,
             'applicant_rating': self.applicant.reputation_score if self.applicant else 0,
             'applicant_review_count': review_count,
             'applicant_completed_tasks': completed_tasks_count,
