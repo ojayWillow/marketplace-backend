@@ -152,7 +152,7 @@ def update_profile(current_user_id):
         
         data = request.get_json()
         
-        # Updateable fields
+        # Basic profile fields
         if 'first_name' in data:
             user.first_name = data['first_name']
         if 'last_name' in data:
@@ -169,6 +169,27 @@ def update_profile(current_user_id):
             user.avatar_url = data['avatar_url']
         if 'profile_picture_url' in data:
             user.profile_picture_url = data['profile_picture_url']
+        
+        # Helper-specific fields
+        if 'is_helper' in data:
+            user.is_helper = data['is_helper']
+        if 'skills' in data:
+            # Accept either comma-separated string or array
+            if isinstance(data['skills'], list):
+                user.skills = ','.join(data['skills'])
+            else:
+                user.skills = data['skills']
+        if 'helper_categories' in data:
+            if isinstance(data['helper_categories'], list):
+                user.helper_categories = ','.join(data['helper_categories'])
+            else:
+                user.helper_categories = data['helper_categories']
+        if 'hourly_rate' in data:
+            user.hourly_rate = data['hourly_rate']
+        if 'latitude' in data:
+            user.latitude = data['latitude']
+        if 'longitude' in data:
+            user.longitude = data['longitude']
         
         user.updated_at = datetime.utcnow()
         db.session.commit()
@@ -215,6 +236,10 @@ def get_user_public(user_id):
             'completion_rate': user.completion_rate,
             'reviews_count': len(reviews_received),
             'average_rating': round(avg_rating, 1),
+            'is_helper': user.is_helper,
+            'skills': user.skills.split(',') if user.skills else [],
+            'helper_categories': user.helper_categories.split(',') if user.helper_categories else [],
+            'hourly_rate': user.hourly_rate,
             'created_at': user.created_at.isoformat()
         }
         
