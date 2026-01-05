@@ -32,27 +32,29 @@ class TaskRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
-    # Relationships
-    creator = db.relationship('User', foreign_keys=[creator_id], backref='created_tasks_rel')
-    assigned_to = db.relationship('User', foreign_keys=[assigned_to_id], backref='assigned_tasks_rel')
-    
     def to_dict(self):
         """Convert task request to dictionary."""
+        from app.models import User
+        
         # Get creator name
         creator_name = None
-        if self.creator:
-            if self.creator.first_name and self.creator.last_name:
-                creator_name = f"{self.creator.first_name} {self.creator.last_name}"
-            else:
-                creator_name = self.creator.username
+        if self.creator_id:
+            creator = User.query.get(self.creator_id)
+            if creator:
+                if creator.first_name and creator.last_name:
+                    creator_name = f"{creator.first_name} {creator.last_name}"
+                else:
+                    creator_name = creator.username
         
         # Get assigned user name
         assigned_to_name = None
-        if self.assigned_to:
-            if self.assigned_to.first_name and self.assigned_to.last_name:
-                assigned_to_name = f"{self.assigned_to.first_name} {self.assigned_to.last_name}"
-            else:
-                assigned_to_name = self.assigned_to.username
+        if self.assigned_to_id:
+            assigned_user = User.query.get(self.assigned_to_id)
+            if assigned_user:
+                if assigned_user.first_name and assigned_user.last_name:
+                    assigned_to_name = f"{assigned_user.first_name} {assigned_user.last_name}"
+                else:
+                    assigned_to_name = assigned_user.username
         
         return {
             'id': self.id,
