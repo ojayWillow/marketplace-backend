@@ -39,7 +39,7 @@ class TaskApplication(db.Model):
         review_count = 0
         if self.applicant:
             from app.models.review import Review
-            review_count = Review.query.filter_by(reviewee_id=self.applicant_id).count()
+            review_count = Review.query.filter_by(reviewed_user_id=self.applicant_id).count()
         
         # Get avatar URL safely
         applicant_avatar = None
