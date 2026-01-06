@@ -8,5 +8,6 @@ from .task_response import TaskResponse
 from .task_application import TaskApplication
 from .message import Conversation, Message
 from .offering import Offering
+from .favorite import Favorite
 
-__all__ = ['User', 'Listing', 'TaskRequest', 'Review', 'TaskResponse', 'TaskApplication', 'Conversation', 'Message', 'Offering']
+__all__ = ['User', 'Listing', 'TaskRequest', 'Review', 'TaskResponse', 'TaskApplication', 'Conversation', 'Message', 'Offering', 'Favorite']
