@@ -1,17 +1,18 @@
 # Marketplace Backend - Project Status
 
-**Last Updated**: January 4, 2026, 8:12 PM EET
+**Last Updated**: January 6, 2026, 5:05 PM EET
 
 ---
 
 ## 🚀 Quick Summary
 
-**Overall Status**: ✅ **MVP Complete (95%)**
+**Overall Status**: ✅ **MVP Complete (98%)**
 
 **Working Features**:
 - ✅ User authentication (register, login, JWT)
 - ✅ Buy/Sell listings (full CRUD)
 - ✅ Quick Help tasks (full workflow)
+- ✅ Service Offerings (full CRUD) - **NEW!**
 - ✅ Reviews & ratings system
 - ✅ File uploads (images)
 - ✅ Location-based search
@@ -26,6 +27,7 @@
 | **Authentication** | ✅ Complete | 100% |
 | **Listings** | ✅ Complete | 100% |
 | **Tasks** | ✅ Complete | 100% |
+| **Offerings** | ✅ Complete | 100% |
 | **Reviews** | ✅ Complete | 100% |
 | **Uploads** | ✅ Basic | 80% |
 | **Testing** | ⬜ Not Started | 0% |
@@ -52,11 +54,21 @@
 ### Quick Help Tasks
 - Create tasks with location (lat/lng)
 - Browse tasks by location (radius search)
-- Accept tasks as worker
+- Apply for tasks as worker (application system)
 - Complete task workflow:
   - `open` → `assigned` → `pending_confirmation` → `completed`
 - Mark done, confirm, dispute actions
 - View my tasks (assigned & created)
+- Task applications with accept/reject
+
+### Service Offerings (NEW!)
+- Create offerings with location, price, category
+- Browse offerings by location (radius search)
+- Filter by category and status
+- View offering details with provider info
+- Edit/delete own offerings
+- Support for hourly/fixed/negotiable pricing
+- Experience and availability fields
 
 ### Reviews & Ratings
 - Leave reviews for users
@@ -69,6 +81,23 @@
 - Image upload endpoint
 - File validation (type, size)
 - Serve uploaded files
+
+---
+
+## 🆕 Recent Updates (January 5-6, 2026)
+
+### Service Offerings API
+- ✅ Created Offering model with all fields
+- ✅ Full CRUD endpoints for offerings
+- ✅ Location-based search (radius filtering)
+- ✅ Category filtering support
+- ✅ Status management (active/paused/archived)
+- ✅ Price types: hourly, fixed, negotiable
+
+### Task Application System
+- ✅ Workers apply instead of direct accept
+- ✅ Task creators can accept/reject applications
+- ✅ Application count shown on tasks
 
 ---
 
@@ -118,12 +147,23 @@ POST   /                      - Create task (auth)
 GET    /:id                   - Task details
 PUT    /:id                   - Update task (auth)
 DELETE /:id                   - Delete task (auth)
-POST   /:id/accept            - Accept task (auth)
+POST   /:id/apply             - Apply for task (auth)
+POST   /:id/accept-application - Accept applicant (auth)
 POST   /:id/done              - Mark done (auth)
 POST   /:id/confirm           - Confirm completion (auth)
 POST   /:id/dispute           - Dispute (auth)
 GET    /my                    - My assigned tasks (auth)
 GET    /created               - My created tasks (auth)
+```
+
+### Offerings (`/api/offerings`) - NEW!
+```
+GET    /                      - Browse offerings (with location filter)
+POST   /                      - Create offering (auth)
+GET    /:id                   - Offering details
+PUT    /:id                   - Update offering (auth)
+DELETE /:id                   - Delete offering (auth)
+GET    /my                    - My offerings (auth)
 ```
 
 ### Reviews (`/api/reviews`)
@@ -165,12 +205,14 @@ marketplace-backend/
 │   │   ├── user.py
 │   │   ├── listing.py
 │   │   ├── task_request.py
+│   │   ├── offering.py      # NEW!
 │   │   ├── review.py
 │   │   └── task_response.py
 │   └── routes/             # API blueprints
 │       ├── auth.py
 │       ├── listings.py
 │       ├── tasks.py
+│       ├── offerings.py     # NEW!
 │       ├── reviews.py
 │       └── uploads.py
 ├── docs/
@@ -230,7 +272,7 @@ python wsgi.py
 
 ## 📌 Status Notes
 
-**Current State**: All core APIs working and tested with frontend. Ready for production deployment with minor polish.
+**Current State**: All core APIs working and tested with frontend. Service Offerings feature added. Ready for production deployment with minor polish.
 
 **Known Limitations**:
 - No automated tests yet
@@ -238,10 +280,8 @@ python wsgi.py
 - No database migrations
 - Basic error messages
 
-**Taking a Break**: Pausing development for review. All essential features implemented and functional.
-
 ---
 
-**Last Test**: January 4, 2026, 8:00 PM EET  
+**Last Test**: January 6, 2026, 5:00 PM EET  
 **Frontend Integration**: ✅ Working  
 **Status**: ✅ Production Ready (MVP)
