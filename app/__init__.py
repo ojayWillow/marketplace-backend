@@ -15,11 +15,14 @@ jwt = JWTManager()
 def create_app(config_name='development'):
     app = Flask(__name__)
     
-    # Configuration
-    if config_name == 'development':
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///marketplace.db'
-    elif config_name == 'testing':
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    # Configuration - prioritize environment variables for cloud deployment
+    app.config['SQLALCHEMY_DATABASE_URI'] = (
+        os.environ.get('SQLALCHEMY_DATABASE_URI')
+        or os.environ.get('DATABASE_URL')
+        or ('sqlite:///:memory:' if config_name == 'testing' else 'sqlite:///marketplace.db')
+    )
+    
+    if config_name == 'testing':
         app.config['TESTING'] = True
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
@@ -34,13 +37,14 @@ def create_app(config_name='development'):
     migrate.init_app(app, db)
     jwt.init_app(app)
     
-    # CORS configuration - allow both Vite dev server ports
+    # CORS configuration - allow frontend origins
     CORS(app, 
          origins=[
              "http://localhost:3000",
              "http://127.0.0.1:3000",
              "http://localhost:5173",  # Vite default port
-             "http://127.0.0.1:5173"   # Vite default port
+             "http://127.0.0.1:5173",  # Vite default port
+             "https://marketplace-frontend-tau-seven.vercel.app",  # Production frontend
          ],
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization", "Accept"],
