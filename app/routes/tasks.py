@@ -133,7 +133,11 @@ def get_created_tasks(current_user_id):
 
 @tasks_bp.route('', methods=['GET'])
 def get_tasks():
-    """Get task requests with filtering and geolocation."""
+    """Get task requests with filtering and geolocation.
+    
+    FIXED: Radius filtering now happens BEFORE pagination to ensure correct results.
+    When location is provided, tasks are sorted by distance (closest first).
+    """
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -143,29 +147,62 @@ def get_tasks():
         longitude = request.args.get('longitude', type=float)
         radius = request.args.get('radius', 10, type=float)
         
+        # Build base query
         query = TaskRequest.query.filter_by(status=status)
         
         if category:
             query = query.filter_by(category=category)
         
-        tasks = query.paginate(page=page, per_page=per_page)
-        
-        results = []
-        for task in tasks.items:
-            if latitude and longitude:
+        # If location filtering is requested, we need to:
+        # 1. Get ALL matching tasks first
+        # 2. Filter by distance
+        # 3. Sort by distance
+        # 4. Then apply pagination manually
+        if latitude is not None and longitude is not None:
+            # Get all tasks matching status/category (no pagination yet)
+            all_tasks = query.all()
+            
+            # Filter by distance and calculate distance for each
+            tasks_with_distance = []
+            for task in all_tasks:
+                # Skip tasks without valid coordinates
+                if task.latitude is None or task.longitude is None:
+                    continue
+                    
                 dist = distance(latitude, longitude, task.latitude, task.longitude)
                 if dist <= radius:
                     task_dict = task.to_dict()
                     task_dict['distance'] = round(dist, 2)
-                    results.append(task_dict)
-            else:
-                results.append(task.to_dict())
-        
-        return jsonify({
-            'tasks': results,
-            'total': len(results),
-            'page': page
-        }), 200
+                    tasks_with_distance.append(task_dict)
+            
+            # Sort by distance (closest first)
+            tasks_with_distance.sort(key=lambda x: x['distance'])
+            
+            # Calculate pagination manually
+            total = len(tasks_with_distance)
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_results = tasks_with_distance[start:end]
+            
+            return jsonify({
+                'tasks': paginated_results,
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'has_more': end < total
+            }), 200
+        else:
+            # No location filtering - use normal pagination
+            tasks = query.order_by(TaskRequest.created_at.desc()).paginate(page=page, per_page=per_page)
+            
+            return jsonify({
+                'tasks': [task.to_dict() for task in tasks.items],
+                'total': tasks.total,
+                'page': page,
+                'per_page': per_page,
+                'has_more': tasks.has_next
+            }), 200
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -287,7 +324,35 @@ def update_task(current_user_id, task_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ============ NEW APPLICATION SYSTEM ENDPOINTS ============
+@tasks_bp.route('/<int:task_id>/applications/<int:application_id>', methods=['DELETE'])
+@token_required
+def withdraw_application(current_user_id, task_id, application_id):
+    """Withdraw/delete an application (only the applicant can do this, only if pending)."""
+    try:
+        application = TaskApplication.query.get(application_id)
+        if not application or application.task_id != task_id:
+            return jsonify({'error': 'Application not found'}), 404
+        
+        # Only the applicant can withdraw
+        if application.applicant_id != current_user_id:
+            return jsonify({'error': 'Only the applicant can withdraw this application'}), 403
+        
+        # Can only withdraw pending applications
+        if application.status != 'pending':
+            return jsonify({'error': 'Only pending applications can be withdrawn'}), 400
+        
+        db.session.delete(application)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Application withdrawn successfully'
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============ APPLICATION SYSTEM ENDPOINTS ============
 
 @tasks_bp.route('/<int:task_id>/apply', methods=['POST'])
 @token_required
