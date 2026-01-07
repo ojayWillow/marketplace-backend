@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+import secrets
 from app import db
 
 
@@ -31,6 +32,11 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
+    # TOTP Two-Factor Authentication fields
+    totp_secret = db.Column(db.String(32), nullable=True)  # Base32 encoded secret
+    totp_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    totp_backup_codes = db.Column(db.Text, nullable=True)  # Comma-separated backup codes
+    
     # Helper-specific fields (all nullable for SQLite compatibility)
     is_helper = db.Column(db.Boolean, default=False, nullable=True)  # User is available to help
     skills = db.Column(db.Text, nullable=True)  # Comma-separated list of skills
@@ -52,6 +58,32 @@ class User(db.Model):
         """Check if the provided password matches the hash."""
         return check_password_hash(self.password_hash, password)
     
+    def generate_backup_codes(self, count=8):
+        """Generate backup codes for 2FA recovery."""
+        codes = [secrets.token_hex(4).upper() for _ in range(count)]  # 8-char codes like "A1B2C3D4"
+        self.totp_backup_codes = ','.join(codes)
+        return codes
+    
+    def verify_backup_code(self, code):
+        """Verify and consume a backup code."""
+        if not self.totp_backup_codes:
+            return False
+        
+        codes = self.totp_backup_codes.split(',')
+        code_upper = code.upper().replace('-', '').replace(' ', '')
+        
+        if code_upper in codes:
+            codes.remove(code_upper)
+            self.totp_backup_codes = ','.join(codes) if codes else None
+            return True
+        return False
+    
+    def get_backup_codes_count(self):
+        """Get number of remaining backup codes."""
+        if not self.totp_backup_codes:
+            return 0
+        return len(self.totp_backup_codes.split(','))
+    
     def to_dict(self):
         """Convert user to dictionary."""
         return {
@@ -72,6 +104,8 @@ class User(db.Model):
             'phone_verified': self.phone_verified,
             'reputation_score': self.reputation_score,
             'completion_rate': self.completion_rate,
+            'totp_enabled': self.totp_enabled,
+            'backup_codes_remaining': self.get_backup_codes_count(),
             'is_helper': self.is_helper or False,
             'skills': self.skills,
             'helper_categories': self.helper_categories,
