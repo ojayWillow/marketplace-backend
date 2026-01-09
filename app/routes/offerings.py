@@ -82,10 +82,24 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 
+def translate_offering_if_needed(offering_dict: dict, lang: str | None) -> dict:
+    """Translate offering title and description if language is specified."""
+    if not lang:
+        return offering_dict
+    
+    try:
+        from app.services.translation import translate_offering
+        return translate_offering(offering_dict, lang)
+    except Exception as e:
+        # If translation fails, return original
+        print(f"Translation error: {e}")
+        return offering_dict
+
+
 @offerings_bp.route('', methods=['GET'])
 @token_optional
 def get_offerings():
-    """Get all offerings with optional filtering and geolocation."""
+    """Get all offerings with optional filtering, geolocation, and translation."""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -95,6 +109,7 @@ def get_offerings():
         longitude = request.args.get('longitude', type=float)
         radius = request.args.get('radius', 25, type=float)  # Default 25km
         boosted_only = request.args.get('boosted_only', 'false').lower() == 'true'
+        lang = request.args.get('lang')  # Language for translation
         
         query = Offering.query
         
@@ -134,6 +149,8 @@ def get_offerings():
                 if distance <= radius:
                     offering_dict = offering.to_dict()
                     offering_dict['distance'] = round(distance, 2)
+                    # Translate if language specified
+                    offering_dict = translate_offering_if_needed(offering_dict, lang)
                     filtered_offerings.append(offering_dict)
             
             # Sort: boosted first, then by distance
@@ -153,8 +170,10 @@ def get_offerings():
             # Paginate without distance filter
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)
             
+            offerings_list = [translate_offering_if_needed(o.to_dict(), lang) for o in paginated.items]
+            
             return jsonify({
-                'offerings': [o.to_dict() for o in paginated.items],
+                'offerings': offerings_list,
                 'total': paginated.total,
                 'page': page
             }), 200
@@ -168,10 +187,14 @@ def get_offerings():
 def get_my_offerings():
     """Get offerings created by current user."""
     try:
+        lang = request.args.get('lang')
+        
         offerings = Offering.query.filter_by(creator_id=g.current_user.id).order_by(Offering.created_at.desc()).all()
         
+        offerings_list = [translate_offering_if_needed(o.to_dict(), lang) for o in offerings]
+        
         return jsonify({
-            'offerings': [o.to_dict() for o in offerings],
+            'offerings': offerings_list,
             'total': len(offerings),
             'page': 1
         }), 200
@@ -185,12 +208,15 @@ def get_my_offerings():
 def get_offering(offering_id):
     """Get a single offering by ID."""
     try:
+        lang = request.args.get('lang')
+        
         offering = Offering.query.get(offering_id)
         
         if not offering:
             return jsonify({'error': 'Offering not found'}), 404
         
-        return jsonify(offering.to_dict()), 200
+        offering_dict = translate_offering_if_needed(offering.to_dict(), lang)
+        return jsonify(offering_dict), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
