@@ -49,6 +49,20 @@ def distance(lat1, lon1, lat2, lon2):
     return R * c
 
 
+def translate_task_if_needed(task_dict: dict, lang: str | None) -> dict:
+    """Translate task title and description if language is specified."""
+    if not lang:
+        return task_dict
+    
+    try:
+        from app.services.translation import translate_task
+        return translate_task(task_dict, lang)
+    except Exception as e:
+        # If translation fails, return original
+        print(f"Translation error: {e}")
+        return task_dict
+
+
 @tasks_bp.route('/notifications', methods=['GET'])
 @token_required
 def get_task_notifications(current_user_id):
@@ -90,13 +104,17 @@ def get_task_notifications(current_user_id):
 def get_my_tasks(current_user_id):
     """Get tasks assigned to the current user (as worker), including completed ones."""
     try:
+        lang = request.args.get('lang')
+        
         my_tasks = TaskRequest.query.filter(
             TaskRequest.assigned_to_id == current_user_id,
             TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation', 'completed'])
         ).order_by(TaskRequest.created_at.desc()).all()
         
+        tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in my_tasks]
+        
         return jsonify({
-            'tasks': [task.to_dict() for task in my_tasks],
+            'tasks': tasks_list,
             'total': len(my_tasks)
         }), 200
     except Exception as e:
@@ -108,13 +126,15 @@ def get_my_tasks(current_user_id):
 def get_created_tasks(current_user_id):
     """Get tasks created by the current user (as client), with pending applications count."""
     try:
+        lang = request.args.get('lang')
+        
         created_tasks = TaskRequest.query.filter(
             TaskRequest.creator_id == current_user_id
         ).order_by(TaskRequest.created_at.desc()).all()
         
         results = []
         for task in created_tasks:
-            task_dict = task.to_dict()
+            task_dict = translate_task_if_needed(task.to_dict(), lang)
             # Count pending applications for each task
             pending_count = TaskApplication.query.filter_by(
                 task_id=task.id,
@@ -133,10 +153,15 @@ def get_created_tasks(current_user_id):
 
 @tasks_bp.route('', methods=['GET'])
 def get_tasks():
-    """Get task requests with filtering and geolocation.
+    """Get task requests with filtering, geolocation, and optional translation.
     
-    FIXED: Radius filtering now happens BEFORE pagination to ensure correct results.
-    When location is provided, tasks are sorted by distance (closest first).
+    Query params:
+        - lang: Language code (lv, en, ru) for auto-translation
+        - latitude, longitude: User location
+        - radius: Search radius in km (default 10)
+        - status: Task status filter (default 'open')
+        - category: Category filter
+        - page, per_page: Pagination
     """
     try:
         page = request.args.get('page', 1, type=int)
@@ -146,6 +171,7 @@ def get_tasks():
         latitude = request.args.get('latitude', type=float)
         longitude = request.args.get('longitude', type=float)
         radius = request.args.get('radius', 10, type=float)
+        lang = request.args.get('lang')  # Language for translation
         
         # Build base query
         query = TaskRequest.query.filter_by(status=status)
@@ -173,6 +199,8 @@ def get_tasks():
                 if dist <= radius:
                     task_dict = task.to_dict()
                     task_dict['distance'] = round(dist, 2)
+                    # Translate if language specified
+                    task_dict = translate_task_if_needed(task_dict, lang)
                     tasks_with_distance.append(task_dict)
             
             # Sort by distance (closest first)
@@ -195,8 +223,10 @@ def get_tasks():
             # No location filtering - use normal pagination
             tasks = query.order_by(TaskRequest.created_at.desc()).paginate(page=page, per_page=per_page)
             
+            tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in tasks.items]
+            
             return jsonify({
-                'tasks': [task.to_dict() for task in tasks.items],
+                'tasks': tasks_list,
                 'total': tasks.total,
                 'page': page,
                 'per_page': per_page,
@@ -211,11 +241,14 @@ def get_tasks():
 def get_task(task_id):
     """Get a specific task request by ID."""
     try:
+        lang = request.args.get('lang')
+        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
-        return jsonify(task.to_dict()), 200
+        task_dict = translate_task_if_needed(task.to_dict(), lang)
+        return jsonify(task_dict), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -514,6 +547,8 @@ def reject_application(current_user_id, task_id, application_id):
 def get_my_applications(current_user_id):
     """Get all applications submitted by current user."""
     try:
+        lang = request.args.get('lang')
+        
         applications = TaskApplication.query.filter_by(
             applicant_id=current_user_id
         ).order_by(TaskApplication.created_at.desc()).all()
@@ -523,7 +558,7 @@ def get_my_applications(current_user_id):
             app_dict = app.to_dict()
             # Include task info
             if app.task:
-                app_dict['task'] = app.task.to_dict()
+                app_dict['task'] = translate_task_if_needed(app.task.to_dict(), lang)
             results.append(app_dict)
         
         return jsonify({
