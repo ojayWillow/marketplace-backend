@@ -57,7 +57,9 @@ class Conversation(db.Model):
                     'first_name': other_user.first_name,
                     'last_name': other_user.last_name,
                     'avatar_url': other_user.avatar_url or other_user.profile_picture_url,
-                    'is_verified': other_user.is_verified
+                    'is_verified': other_user.is_verified,
+                    'online_status': other_user.get_online_status(),
+                    'last_seen_display': other_user.get_last_seen_display()
                 }
             unread_count = self.get_unread_count(current_user_id)
         
@@ -106,7 +108,9 @@ class Message(db.Model):
                 'username': self.sender.username,
                 'first_name': self.sender.first_name,
                 'last_name': self.sender.last_name,
-                'avatar_url': self.sender.avatar_url or self.sender.profile_picture_url
+                'avatar_url': self.sender.avatar_url or self.sender.profile_picture_url,
+                'online_status': self.sender.get_online_status(),
+                'last_seen_display': self.sender.get_last_seen_display()
             }
         
         return {
