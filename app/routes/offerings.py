@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, g
 from functools import wraps
 import jwt
 import os
+from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 
 from app import db
@@ -93,6 +94,7 @@ def get_offerings():
         latitude = request.args.get('latitude', type=float)
         longitude = request.args.get('longitude', type=float)
         radius = request.args.get('radius', 25, type=float)  # Default 25km
+        boosted_only = request.args.get('boosted_only', 'false').lower() == 'true'
         
         query = Offering.query
         
@@ -104,8 +106,19 @@ def get_offerings():
         if category:
             query = query.filter(Offering.category == category)
         
-        # Order by newest first
-        query = query.order_by(Offering.created_at.desc())
+        # Filter by boosted only (for map display)
+        if boosted_only:
+            # Only return offerings that are boosted AND boost hasn't expired
+            query = query.filter(
+                Offering.is_boosted == True,
+                Offering.boost_expires_at > datetime.utcnow()
+            )
+        
+        # Order: boosted first, then by newest
+        query = query.order_by(
+            Offering.is_boosted.desc(),
+            Offering.created_at.desc()
+        )
         
         # Execute query
         offerings = query.all()
@@ -123,8 +136,8 @@ def get_offerings():
                     offering_dict['distance'] = round(distance, 2)
                     filtered_offerings.append(offering_dict)
             
-            # Sort by distance
-            filtered_offerings.sort(key=lambda x: x['distance'])
+            # Sort: boosted first, then by distance
+            filtered_offerings.sort(key=lambda x: (not x.get('is_boost_active', False), x['distance']))
             
             # Paginate
             start = (page - 1) * per_page
@@ -320,7 +333,7 @@ def pause_offering(offering_id):
 @offerings_bp.route('/<int:offering_id>/activate', methods=['POST'])
 @token_required
 def activate_offering(offering_id):
-    """Activate/resume an offering."""
+    """Activate/resume an offering (without boost)."""
     try:
         offering = Offering.query.get(offering_id)
         
@@ -337,6 +350,47 @@ def activate_offering(offering_id):
         return jsonify({
             'message': 'Offering activated',
             'offering': offering.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@offerings_bp.route('/<int:offering_id>/boost', methods=['POST'])
+@token_required
+def boost_offering(offering_id):
+    """Boost an offering to show on the map (24-hour trial)."""
+    try:
+        offering = Offering.query.get(offering_id)
+        
+        if not offering:
+            return jsonify({'error': 'Offering not found'}), 404
+        
+        # Check ownership
+        if offering.creator_id != g.current_user.id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        data = request.get_json() or {}
+        duration_hours = data.get('duration_hours', 24)  # Default 24 hours
+        
+        # For now, limit to 24 hours for free trial
+        # In the future, this can be extended with payment integration
+        max_free_hours = 24
+        duration_hours = min(duration_hours, max_free_hours)
+        
+        # Activate boost
+        offering.status = 'active'  # Also ensure status is active
+        offering.is_boosted = True
+        offering.boost_expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'Offering boosted for {duration_hours} hours! It will now appear on the map.',
+            'offering': offering.to_dict(),
+            'boost_duration_hours': duration_hours,
+            'boost_expires_at': offering.boost_expires_at.isoformat()
         }), 200
         
     except Exception as e:
