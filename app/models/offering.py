@@ -26,11 +26,24 @@ class Offering(db.Model):
     service_radius = db.Column(db.Float, default=25.0, nullable=False)  # Service area in km
     images = db.Column(db.JSON, nullable=True)  # Array of image URLs
     contact_count = db.Column(db.Integer, default=0, nullable=False)  # How many times contacted
+    
+    # Boost/Premium visibility fields
+    is_boosted = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    boost_expires_at = db.Column(db.DateTime, nullable=True)
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     # Relationship to creator
     creator = db.relationship('User', backref=db.backref('offerings', lazy='dynamic'))
+    
+    def is_boost_active(self):
+        """Check if the boost is currently active (not expired)."""
+        if not self.is_boosted:
+            return False
+        if self.boost_expires_at is None:
+            return False
+        return datetime.utcnow() < self.boost_expires_at
     
     def to_dict(self):
         """Convert offering to dictionary."""
@@ -79,6 +92,9 @@ class Offering(db.Model):
             'service_radius': self.service_radius,
             'images': self.images,
             'contact_count': self.contact_count,
+            'is_boosted': self.is_boosted,
+            'is_boost_active': self.is_boost_active(),
+            'boost_expires_at': self.boost_expires_at.isoformat() if self.boost_expires_at else None,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
