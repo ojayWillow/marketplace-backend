@@ -1,6 +1,6 @@
 """User model for authentication and user management."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import db
 
@@ -30,6 +30,7 @@ class User(db.Model):
     completion_rate = db.Column(db.Float, default=0.0, nullable=False) # Percentage of completed tasks
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)  # Track user activity
     
     # Helper-specific fields (all nullable for SQLite compatibility)
     is_helper = db.Column(db.Boolean, default=False, nullable=True)  # User is available to help
@@ -51,6 +52,61 @@ class User(db.Model):
     def check_password(self, password):
         """Check if the provided password matches the hash."""
         return check_password_hash(self.password_hash, password)
+    
+    def update_last_seen(self):
+        """Update the last_seen timestamp."""
+        self.last_seen = datetime.utcnow()
+    
+    def get_online_status(self):
+        """
+        Get user's online status based on last_seen.
+        Returns: 'online', 'recently', or 'inactive'
+        """
+        if not self.last_seen:
+            return 'inactive'
+        
+        now = datetime.utcnow()
+        time_diff = now - self.last_seen
+        
+        # Online: active in last 5 minutes
+        if time_diff < timedelta(minutes=5):
+            return 'online'
+        
+        # Recently: active in last 30 minutes
+        if time_diff < timedelta(minutes=30):
+            return 'recently'
+        
+        # Inactive: not seen for 3+ days
+        if time_diff > timedelta(days=3):
+            return 'inactive'
+        
+        # Default: recently (between 30 min and 3 days)
+        return 'recently'
+    
+    def get_last_seen_display(self):
+        """
+        Get human-readable last seen text.
+        Returns string like "5 minutes ago", "2 hours ago", "3 days ago"
+        """
+        if not self.last_seen:
+            return None
+        
+        now = datetime.utcnow()
+        time_diff = now - self.last_seen
+        
+        if time_diff < timedelta(minutes=1):
+            return "just now"
+        elif time_diff < timedelta(minutes=60):
+            minutes = int(time_diff.total_seconds() / 60)
+            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+        elif time_diff < timedelta(hours=24):
+            hours = int(time_diff.total_seconds() / 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        elif time_diff < timedelta(days=7):
+            days = int(time_diff.total_seconds() / 86400)
+            return f"{days} day{'s' if days != 1 else ''} ago"
+        else:
+            return self.last_seen.strftime("%b %d, %Y")
     
     def to_dict(self):
         """Convert user to dictionary."""
@@ -79,7 +135,34 @@ class User(db.Model):
             'latitude': self.latitude,
             'longitude': self.longitude,
             'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            'updated_at': self.updated_at.isoformat(),
+            'last_seen': self.last_seen.isoformat() if self.last_seen else None,
+            'online_status': self.get_online_status(),
+            'last_seen_display': self.get_last_seen_display()
+        }
+    
+    def to_public_dict(self):
+        """Convert user to dictionary for public viewing (excludes sensitive data)."""
+        return {
+            'id': self.id,
+            'username': self.username,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'avatar_url': self.avatar_url,
+            'bio': self.bio,
+            'city': self.city,
+            'country': self.country,
+            'is_verified': self.is_verified,
+            'profile_picture_url': self.profile_picture_url,
+            'reputation_score': self.reputation_score,
+            'completion_rate': self.completion_rate,
+            'is_helper': self.is_helper or False,
+            'skills': self.skills,
+            'helper_categories': self.helper_categories,
+            'hourly_rate': self.hourly_rate,
+            'created_at': self.created_at.isoformat(),
+            'online_status': self.get_online_status(),
+            'last_seen_display': self.get_last_seen_display()
         }
     
     def __repr__(self):
