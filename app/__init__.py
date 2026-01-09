@@ -1,7 +1,7 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, get_jwt_identity, verify_jwt_in_request
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
@@ -66,6 +66,33 @@ def create_app(config_name=None):
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization", "Accept"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
+    
+    # Middleware to update user's last_seen on authenticated requests
+    @app.before_request
+    def update_last_seen():
+        """Update user's last_seen timestamp on every authenticated request."""
+        # Skip for OPTIONS requests (CORS preflight)
+        if request.method == 'OPTIONS':
+            return
+        
+        # Skip for public endpoints
+        public_paths = ['/health', '/api/auth/login', '/api/auth/register']
+        if any(request.path.startswith(path) for path in public_paths):
+            return
+        
+        # Try to get authenticated user and update last_seen
+        try:
+            verify_jwt_in_request(optional=True)
+            user_id = get_jwt_identity()
+            if user_id:
+                from app.models import User
+                user = User.query.get(user_id)
+                if user:
+                    user.update_last_seen()
+                    db.session.commit()
+        except Exception:
+            # Silently ignore errors - don't break the request
+            pass
     
     # Health check route with debug info
     @app.route('/health', methods=['GET'])
