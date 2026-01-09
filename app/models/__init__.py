@@ -9,5 +9,6 @@ from .task_application import TaskApplication
 from .message import Conversation, Message
 from .offering import Offering
 from .favorite import Favorite
+from .translation_cache import TranslationCache
 
-__all__ = ['User', 'Listing', 'TaskRequest', 'Review', 'TaskResponse', 'TaskApplication', 'Conversation', 'Message', 'Offering', 'Favorite']
+__all__ = ['User', 'Listing', 'TaskRequest', 'Review', 'TaskResponse', 'TaskApplication', 'Conversation', 'Message', 'Offering', 'Favorite', 'TranslationCache']
