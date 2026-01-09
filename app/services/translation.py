@@ -2,7 +2,6 @@
 import os
 import hashlib
 import requests
-from app import db
 
 # Configuration - change this to switch providers
 TRANSLATION_SERVICE = os.environ.get('TRANSLATION_SERVICE', 'google')
@@ -12,23 +11,6 @@ GOOGLE_API_KEY = os.environ.get('GOOGLE_TRANSLATE_API_KEY', '')
 SUPPORTED_LANGUAGES = ['lv', 'en', 'ru']
 
 
-class TranslationCache(db.Model):
-    """Cache translations to avoid re-translating the same text."""
-    __tablename__ = 'translation_cache'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    text_hash = db.Column(db.String(64), nullable=False, index=True)
-    source_lang = db.Column(db.String(5), nullable=False)
-    target_lang = db.Column(db.String(5), nullable=False)
-    original_text = db.Column(db.Text, nullable=False)
-    translated_text = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=db.func.now())
-    
-    __table_args__ = (
-        db.UniqueConstraint('text_hash', 'target_lang', name='unique_translation'),
-    )
-
-
 def get_text_hash(text: str) -> str:
     """Generate a hash for the text to use as cache key."""
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -36,17 +18,24 @@ def get_text_hash(text: str) -> str:
 
 def get_cached_translation(text: str, target_lang: str) -> str | None:
     """Check if we have a cached translation."""
-    text_hash = get_text_hash(text)
-    cached = TranslationCache.query.filter_by(
-        text_hash=text_hash,
-        target_lang=target_lang
-    ).first()
-    return cached.translated_text if cached else None
+    try:
+        from app.models import TranslationCache
+        text_hash = get_text_hash(text)
+        cached = TranslationCache.query.filter_by(
+            text_hash=text_hash,
+            target_lang=target_lang
+        ).first()
+        return cached.translated_text if cached else None
+    except Exception as e:
+        print(f"Cache lookup error: {e}")
+        return None
 
 
 def cache_translation(text: str, source_lang: str, target_lang: str, translated_text: str):
     """Store a translation in the cache."""
     try:
+        from app.models import TranslationCache
+        from app import db
         cache_entry = TranslationCache(
             text_hash=get_text_hash(text),
             source_lang=source_lang,
@@ -56,13 +45,19 @@ def cache_translation(text: str, source_lang: str, target_lang: str, translated_
         )
         db.session.add(cache_entry)
         db.session.commit()
-    except Exception:
-        db.session.rollback()
+    except Exception as e:
+        print(f"Cache storage error: {e}")
+        try:
+            from app import db
+            db.session.rollback()
+        except:
+            pass
 
 
 def google_translate(text: str, target_lang: str) -> tuple[str, str]:
     """Translate using Google Cloud Translation API."""
     if not GOOGLE_API_KEY:
+        print("Google Translate: No API key configured")
         return text, 'en'
     
     url = 'https://translation.googleapis.com/language/translate/v2'
@@ -81,6 +76,8 @@ def google_translate(text: str, target_lang: str) -> tuple[str, str]:
             translated_text = translation['translatedText']
             detected_lang = translation.get('detectedSourceLanguage', 'en')
             return translated_text, detected_lang
+        else:
+            print(f"Google Translate unexpected response: {result}")
     except Exception as e:
         print(f"Google Translate error: {e}")
     
@@ -150,8 +147,8 @@ def translate_text(text: str, target_lang: str) -> str:
     else:
         return text
     
-    # Don't cache if translation failed (returned original)
-    if translated != text:
+    # Don't cache if translation failed (returned original) or same language
+    if translated != text and source_lang != target_lang:
         cache_translation(text, source_lang, target_lang, translated)
     
     return translated
