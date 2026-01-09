@@ -28,8 +28,8 @@ def migrate_database():
     results = []
     
     try:
-        # List of migrations: (table, column, type, default)
-        migrations = [
+        # List of column migrations: (table, column, type, default)
+        column_migrations = [
             # User table - last_seen for online status
             ('users', 'last_seen', 'TIMESTAMP', None),
             
@@ -38,7 +38,7 @@ def migrate_database():
             ('offerings', 'boost_expires_at', 'TIMESTAMP', None),
         ]
         
-        for table, column, col_type, default in migrations:
+        for table, column, col_type, default in column_migrations:
             try:
                 # Check if column exists
                 check_sql = f"""
@@ -64,6 +64,37 @@ def migrate_database():
             except Exception as e:
                 results.append(f"Error with {table}.{column}: {str(e)}")
                 db.session.rollback()
+        
+        # Create translation_cache table if it doesn't exist
+        try:
+            check_table_sql = """
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_name = 'translation_cache'
+            """
+            table_exists = db.session.execute(db.text(check_table_sql)).fetchone()
+            
+            if table_exists is None:
+                create_table_sql = """
+                    CREATE TABLE translation_cache (
+                        id SERIAL PRIMARY KEY,
+                        text_hash VARCHAR(64) NOT NULL,
+                        source_lang VARCHAR(5) NOT NULL,
+                        target_lang VARCHAR(5) NOT NULL,
+                        original_text TEXT NOT NULL,
+                        translated_text TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(text_hash, target_lang)
+                    )
+                """
+                db.session.execute(db.text(create_table_sql))
+                db.session.commit()
+                results.append("Created translation_cache table")
+            else:
+                results.append("Table translation_cache already exists")
+        except Exception as e:
+            results.append(f"Error with translation_cache table: {str(e)}")
+            db.session.rollback()
         
         return jsonify({
             'status': 'success',
