@@ -10,5 +10,6 @@ from .message import Conversation, Message
 from .offering import Offering
 from .favorite import Favorite
 from .translation_cache import TranslationCache
+from .notification import Notification, NotificationType
 
-__all__ = ['User', 'Listing', 'TaskRequest', 'Review', 'TaskResponse', 'TaskApplication', 'Conversation', 'Message', 'Offering', 'Favorite', 'TranslationCache']
+__all__ = ['User', 'Listing', 'TaskRequest', 'Review', 'TaskResponse', 'TaskApplication', 'Conversation', 'Message', 'Offering', 'Favorite', 'TranslationCache', 'Notification', 'NotificationType']
