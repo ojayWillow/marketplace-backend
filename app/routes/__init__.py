@@ -27,6 +27,7 @@ def register_routes(app):
     from .offerings import offerings_bp
     from .favorites import favorites_bp
     from .admin import admin_bp
+    from .notifications import notifications_bp
 
     # Register health check at /api/health
     app.register_blueprint(health_bp, url_prefix='/api')
@@ -43,3 +44,4 @@ def register_routes(app):
     app.register_blueprint(offerings_bp, url_prefix='/api/offerings')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
     app.register_blueprint(favorites_bp)  # Routes already have /api/favorites prefix
+    app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
