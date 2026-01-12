@@ -2,7 +2,7 @@ from __future__ import with_statement
 import logging
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, create_engine
 from sqlalchemy import pool
 
 from alembic import context
@@ -25,9 +25,25 @@ logger = logging.getLogger('alembic.env')
 app = create_app()
 target_metadata = db.metadata
 
+# Get database URL from Flask app config
+def get_url():
+    """Get database URL from Flask app configuration."""
+    with app.app_context():
+        url = app.config.get('SQLALCHEMY_DATABASE_URI')
+        if not url:
+            # Fallback to environment variable
+            url = os.environ.get('DATABASE_URL') or os.environ.get('SQLALCHEMY_DATABASE_URI')
+        if not url:
+            # Default to SQLite for local development
+            url = 'sqlite:///marketplace.db'
+        # Handle Render's postgres:// vs postgresql:// issue
+        if url and url.startswith('postgres://'):
+            url = url.replace('postgres://', 'postgresql://', 1)
+        return url
+
 def run_migrations_offline():
     """Run migrations in 'offline' mode."""
-    url = app.config.get('SQLALCHEMY_DATABASE_URI')
+    url = get_url()
     context.configure(
         url=url, target_metadata=target_metadata, literal_binds=True
     )
@@ -45,18 +61,17 @@ def run_migrations_online():
                 directives[:] = []
                 logger.info('No changes in schema detected.')
 
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix='sqlalchemy.',
-        poolclass=pool.NullPool,
-    )
+    # Get URL from Flask app instead of alembic.ini
+    url = get_url()
+    
+    # Create engine directly with the URL from Flask app
+    connectable = create_engine(url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             process_revision_directives=process_revision_directives,
-            **app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {})
         )
 
         with context.begin_transaction():
