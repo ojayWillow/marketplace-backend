@@ -4,6 +4,11 @@ from app import db
 class TaskApplication(db.Model):
     __tablename__ = 'task_applications'
     
+    # Add unique constraint: one application per user per task
+    __table_args__ = (
+        db.UniqueConstraint('task_id', 'applicant_id', name='unique_task_application'),
+    )
+    
     id = db.Column(db.Integer, primary_key=True)
     task_id = db.Column(db.Integer, db.ForeignKey('task_requests.id'), nullable=False)
     applicant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
