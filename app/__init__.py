@@ -53,6 +53,16 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     jwt.init_app(app)
     
+    # Auto-create tables and constraints on startup
+    with app.app_context():
+        try:
+            db.create_all()
+            # Add unique constraint for task applications (prevent duplicate applications)
+            db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS unique_task_application ON task_applications (task_id, applicant_id)'))
+            db.session.commit()
+        except Exception as e:
+            print(f"Database initialization note: {e}")
+    
     # CORS configuration - allow frontend origins
     CORS(app, 
          origins=[
