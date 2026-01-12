@@ -392,6 +392,9 @@ def withdraw_application(current_user_id, task_id, application_id):
 def apply_to_task(current_user_id, task_id):
     """Apply to a task (worker submits application)."""
     try:
+        # Import notification helpers
+        from app.routes.notifications import notify_new_application
+        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -423,6 +426,12 @@ def apply_to_task(current_user_id, task_id):
         )
         
         db.session.add(application)
+        
+        # Create notification for task creator
+        applicant = User.query.get(current_user_id)
+        applicant_name = applicant.name if applicant else 'Someone'
+        notify_new_application(task.creator_id, applicant_name, task.title, task.id)
+        
         db.session.commit()
         
         return jsonify({
@@ -462,6 +471,9 @@ def get_task_applications(current_user_id, task_id):
 def accept_application(current_user_id, task_id, application_id):
     """Accept an application and assign task to applicant."""
     try:
+        # Import notification helpers
+        from app.routes.notifications import notify_application_accepted, notify_application_rejected
+        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -488,7 +500,10 @@ def accept_application(current_user_id, task_id, application_id):
         task.status = 'assigned'
         task.updated_at = datetime.utcnow()
         
-        # Reject all other pending applications for this task
+        # Create notification for the accepted applicant
+        notify_application_accepted(application.applicant_id, task.title, task.id)
+        
+        # Reject all other pending applications for this task and notify them
         other_applications = TaskApplication.query.filter(
             TaskApplication.task_id == task_id,
             TaskApplication.id != application_id,
@@ -497,6 +512,8 @@ def accept_application(current_user_id, task_id, application_id):
         
         for other_app in other_applications:
             other_app.status = 'rejected'
+            # Notify rejected applicants
+            notify_application_rejected(other_app.applicant_id, task.title, task.id)
         
         db.session.commit()
         
@@ -515,6 +532,9 @@ def accept_application(current_user_id, task_id, application_id):
 def reject_application(current_user_id, task_id, application_id):
     """Reject an application."""
     try:
+        # Import notification helpers
+        from app.routes.notifications import notify_application_rejected
+        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -531,6 +551,10 @@ def reject_application(current_user_id, task_id, application_id):
             return jsonify({'error': 'Application has already been processed'}), 400
         
         application.status = 'rejected'
+        
+        # Notify the rejected applicant
+        notify_application_rejected(application.applicant_id, task.title, task.id)
+        
         db.session.commit()
         
         return jsonify({
@@ -611,6 +635,9 @@ def accept_task(task_id):
 def mark_task_done(current_user_id, task_id):
     """Worker marks task as done - awaiting creator confirmation."""
     try:
+        # Import notification helpers
+        from app.routes.notifications import notify_task_marked_done
+        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -624,6 +651,12 @@ def mark_task_done(current_user_id, task_id):
         
         task.status = 'pending_confirmation'
         task.updated_at = datetime.utcnow()
+        
+        # Notify task creator
+        worker = User.query.get(current_user_id)
+        worker_name = worker.name if worker else 'Worker'
+        notify_task_marked_done(task.creator_id, worker_name, task.title, task.id)
+        
         db.session.commit()
         
         return jsonify({
@@ -640,6 +673,9 @@ def mark_task_done(current_user_id, task_id):
 def confirm_task_completion(current_user_id, task_id):
     """Creator confirms task completion."""
     try:
+        # Import notification helpers
+        from app.routes.notifications import notify_task_completed
+        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -654,6 +690,10 @@ def confirm_task_completion(current_user_id, task_id):
         task.status = 'completed'
         task.completed_at = datetime.utcnow()
         task.updated_at = datetime.utcnow()
+        
+        # Notify the worker that task is confirmed complete
+        notify_task_completed(task.assigned_to_id, task.title, task.id)
+        
         db.session.commit()
         
         return jsonify({
