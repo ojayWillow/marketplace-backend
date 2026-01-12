@@ -63,6 +63,16 @@ def translate_task_if_needed(task_dict: dict, lang: str | None) -> dict:
         return task_dict
 
 
+def safe_notify(notify_func, *args, **kwargs):
+    """Safely call a notification function, ignoring errors if table doesn't exist."""
+    try:
+        return notify_func(*args, **kwargs)
+    except Exception as e:
+        # Log error but don't fail the main operation
+        print(f"Notification error (non-critical): {e}")
+        return None
+
+
 @tasks_bp.route('/notifications', methods=['GET'])
 @token_required
 def get_task_notifications(current_user_id):
@@ -392,9 +402,6 @@ def withdraw_application(current_user_id, task_id, application_id):
 def apply_to_task(current_user_id, task_id):
     """Apply to a task (worker submits application)."""
     try:
-        # Import notification helpers
-        from app.routes.notifications import notify_new_application
-        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -426,13 +433,18 @@ def apply_to_task(current_user_id, task_id):
         )
         
         db.session.add(application)
-        
-        # Create notification for task creator
-        applicant = User.query.get(current_user_id)
-        applicant_name = applicant.name if applicant else 'Someone'
-        notify_new_application(task.creator_id, applicant_name, task.title, task.id)
-        
         db.session.commit()
+        
+        # Try to create notification for task creator (non-blocking)
+        try:
+            from app.routes.notifications import notify_new_application
+            applicant = User.query.get(current_user_id)
+            applicant_name = applicant.name if applicant else 'Someone'
+            notify_new_application(task.creator_id, applicant_name, task.title, task.id)
+            db.session.commit()
+        except Exception as notify_error:
+            print(f"Notification error (non-critical): {notify_error}")
+            # Don't fail the application submission
         
         return jsonify({
             'message': 'Application submitted successfully',
@@ -471,9 +483,6 @@ def get_task_applications(current_user_id, task_id):
 def accept_application(current_user_id, task_id, application_id):
     """Accept an application and assign task to applicant."""
     try:
-        # Import notification helpers
-        from app.routes.notifications import notify_application_accepted, notify_application_rejected
-        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -500,10 +509,7 @@ def accept_application(current_user_id, task_id, application_id):
         task.status = 'assigned'
         task.updated_at = datetime.utcnow()
         
-        # Create notification for the accepted applicant
-        notify_application_accepted(application.applicant_id, task.title, task.id)
-        
-        # Reject all other pending applications for this task and notify them
+        # Reject all other pending applications for this task
         other_applications = TaskApplication.query.filter(
             TaskApplication.task_id == task_id,
             TaskApplication.id != application_id,
@@ -512,10 +518,18 @@ def accept_application(current_user_id, task_id, application_id):
         
         for other_app in other_applications:
             other_app.status = 'rejected'
-            # Notify rejected applicants
-            notify_application_rejected(other_app.applicant_id, task.title, task.id)
         
         db.session.commit()
+        
+        # Try to create notifications (non-blocking)
+        try:
+            from app.routes.notifications import notify_application_accepted, notify_application_rejected
+            notify_application_accepted(application.applicant_id, task.title, task.id)
+            for other_app in other_applications:
+                notify_application_rejected(other_app.applicant_id, task.title, task.id)
+            db.session.commit()
+        except Exception as notify_error:
+            print(f"Notification error (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application accepted and task assigned',
@@ -532,9 +546,6 @@ def accept_application(current_user_id, task_id, application_id):
 def reject_application(current_user_id, task_id, application_id):
     """Reject an application."""
     try:
-        # Import notification helpers
-        from app.routes.notifications import notify_application_rejected
-        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -551,11 +562,15 @@ def reject_application(current_user_id, task_id, application_id):
             return jsonify({'error': 'Application has already been processed'}), 400
         
         application.status = 'rejected'
-        
-        # Notify the rejected applicant
-        notify_application_rejected(application.applicant_id, task.title, task.id)
-        
         db.session.commit()
+        
+        # Try to notify the rejected applicant (non-blocking)
+        try:
+            from app.routes.notifications import notify_application_rejected
+            notify_application_rejected(application.applicant_id, task.title, task.id)
+            db.session.commit()
+        except Exception as notify_error:
+            print(f"Notification error (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application rejected',
@@ -635,9 +650,6 @@ def accept_task(task_id):
 def mark_task_done(current_user_id, task_id):
     """Worker marks task as done - awaiting creator confirmation."""
     try:
-        # Import notification helpers
-        from app.routes.notifications import notify_task_marked_done
-        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -651,13 +663,17 @@ def mark_task_done(current_user_id, task_id):
         
         task.status = 'pending_confirmation'
         task.updated_at = datetime.utcnow()
-        
-        # Notify task creator
-        worker = User.query.get(current_user_id)
-        worker_name = worker.name if worker else 'Worker'
-        notify_task_marked_done(task.creator_id, worker_name, task.title, task.id)
-        
         db.session.commit()
+        
+        # Try to notify task creator (non-blocking)
+        try:
+            from app.routes.notifications import notify_task_marked_done
+            worker = User.query.get(current_user_id)
+            worker_name = worker.name if worker else 'Worker'
+            notify_task_marked_done(task.creator_id, worker_name, task.title, task.id)
+            db.session.commit()
+        except Exception as notify_error:
+            print(f"Notification error (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task marked as done. Waiting for creator confirmation.',
@@ -673,9 +689,6 @@ def mark_task_done(current_user_id, task_id):
 def confirm_task_completion(current_user_id, task_id):
     """Creator confirms task completion."""
     try:
-        # Import notification helpers
-        from app.routes.notifications import notify_task_completed
-        
         task = TaskRequest.query.get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
@@ -690,11 +703,15 @@ def confirm_task_completion(current_user_id, task_id):
         task.status = 'completed'
         task.completed_at = datetime.utcnow()
         task.updated_at = datetime.utcnow()
-        
-        # Notify the worker that task is confirmed complete
-        notify_task_completed(task.assigned_to_id, task.title, task.id)
-        
         db.session.commit()
+        
+        # Try to notify the worker (non-blocking)
+        try:
+            from app.routes.notifications import notify_task_completed
+            notify_task_completed(task.assigned_to_id, task.title, task.id)
+            db.session.commit()
+        except Exception as notify_error:
+            print(f"Notification error (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task completed! Both parties can now leave reviews.',
