@@ -73,6 +73,17 @@ def safe_notify(notify_func, *args, **kwargs):
         return None
 
 
+def get_pending_applications_count(task_id: int) -> int:
+    """Get count of pending applications for a task."""
+    try:
+        return TaskApplication.query.filter_by(
+            task_id=task_id,
+            status='pending'
+        ).count()
+    except Exception:
+        return 0
+
+
 @tasks_bp.route('/notifications', methods=['GET'])
 @token_required
 def get_task_notifications(current_user_id):
@@ -209,6 +220,8 @@ def get_tasks():
                 if dist <= radius:
                     task_dict = task.to_dict()
                     task_dict['distance'] = round(dist, 2)
+                    # Add pending applications count for each task
+                    task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
                     # Translate if language specified
                     task_dict = translate_task_if_needed(task_dict, lang)
                     tasks_with_distance.append(task_dict)
@@ -233,7 +246,12 @@ def get_tasks():
             # No location filtering - use normal pagination
             tasks = query.order_by(TaskRequest.created_at.desc()).paginate(page=page, per_page=per_page)
             
-            tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in tasks.items]
+            tasks_list = []
+            for task in tasks.items:
+                task_dict = translate_task_if_needed(task.to_dict(), lang)
+                # Add pending applications count for each task
+                task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
+                tasks_list.append(task_dict)
             
             return jsonify({
                 'tasks': tasks_list,
@@ -258,6 +276,8 @@ def get_task(task_id):
             return jsonify({'error': 'Task not found'}), 404
         
         task_dict = translate_task_if_needed(task.to_dict(), lang)
+        # Add pending applications count
+        task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
         return jsonify(task_dict), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
