@@ -63,14 +63,18 @@ def translate_task_if_needed(task_dict: dict, lang: str | None) -> dict:
         return task_dict
 
 
-def safe_notify(notify_func, *args, **kwargs):
-    """Safely call a notification function, ignoring errors if table doesn't exist."""
+def safe_create_notification(notify_func, *args, **kwargs):
+    """
+    Safely call a notification function, handling errors gracefully.
+    If notification fails (e.g., table doesn't exist), rollback and continue.
+    """
     try:
-        return notify_func(*args, **kwargs)
+        notify_func(*args, **kwargs)
+        db.session.commit()
     except Exception as e:
-        # Log error but don't fail the main operation
-        print(f"Notification error (non-critical): {e}")
-        return None
+        # Rollback to clean the session state after failed notification
+        db.session.rollback()
+        print(f"Notification skipped (non-critical): {e}")
 
 
 def get_pending_applications_count(task_id: int) -> int:
@@ -455,16 +459,20 @@ def apply_to_task(current_user_id, task_id):
         db.session.add(application)
         db.session.commit()
         
+        # Store values needed for notification before any potential rollback
+        creator_id = task.creator_id
+        task_title = task.title
+        
         # Try to create notification for task creator (non-blocking)
         try:
             from app.routes.notifications import notify_new_application
             applicant = User.query.get(current_user_id)
             applicant_name = applicant.name if applicant else 'Someone'
-            notify_new_application(task.creator_id, applicant_name, task.title, task.id)
+            notify_new_application(creator_id, applicant_name, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
-            print(f"Notification error (non-critical): {notify_error}")
-            # Don't fail the application submission
+            db.session.rollback()
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application submitted successfully',
@@ -536,25 +544,44 @@ def accept_application(current_user_id, task_id, application_id):
             TaskApplication.status == 'pending'
         ).all()
         
+        # Store IDs of rejected applicants for notifications
+        rejected_applicant_ids = [other_app.applicant_id for other_app in other_applications]
+        
         for other_app in other_applications:
             other_app.status = 'rejected'
         
+        # IMPORTANT: Commit the main operation FIRST
         db.session.commit()
         
-        # Try to create notifications (non-blocking)
+        # Store values needed for response and notifications
+        task_dict = task.to_dict()
+        application_dict = application.to_dict()
+        accepted_applicant_id = application.applicant_id
+        task_title = task.title
+        
+        # Try to create notifications (non-blocking, after main commit)
         try:
             from app.routes.notifications import notify_application_accepted, notify_application_rejected
-            notify_application_accepted(application.applicant_id, task.title, task.id)
-            for other_app in other_applications:
-                notify_application_rejected(other_app.applicant_id, task.title, task.id)
+            notify_application_accepted(accepted_applicant_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
-            print(f"Notification error (non-critical): {notify_error}")
+            db.session.rollback()
+            print(f"Accepted notification skipped (non-critical): {notify_error}")
+        
+        # Notify rejected applicants separately
+        for rejected_id in rejected_applicant_ids:
+            try:
+                from app.routes.notifications import notify_application_rejected
+                notify_application_rejected(rejected_id, task_title, task_id)
+                db.session.commit()
+            except Exception as notify_error:
+                db.session.rollback()
+                print(f"Rejected notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application accepted and task assigned',
-            'task': task.to_dict(),
-            'application': application.to_dict()
+            'task': task_dict,
+            'application': application_dict
         }), 200
     except Exception as e:
         db.session.rollback()
@@ -584,17 +611,23 @@ def reject_application(current_user_id, task_id, application_id):
         application.status = 'rejected'
         db.session.commit()
         
+        # Store values for notification
+        applicant_id = application.applicant_id
+        task_title = task.title
+        application_dict = application.to_dict()
+        
         # Try to notify the rejected applicant (non-blocking)
         try:
             from app.routes.notifications import notify_application_rejected
-            notify_application_rejected(application.applicant_id, task.title, task.id)
+            notify_application_rejected(applicant_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
-            print(f"Notification error (non-critical): {notify_error}")
+            db.session.rollback()
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application rejected',
-            'application': application.to_dict()
+            'application': application_dict
         }), 200
     except Exception as e:
         db.session.rollback()
@@ -685,19 +718,25 @@ def mark_task_done(current_user_id, task_id):
         task.updated_at = datetime.utcnow()
         db.session.commit()
         
+        # Store values for notification and response
+        task_dict = task.to_dict()
+        creator_id = task.creator_id
+        task_title = task.title
+        
         # Try to notify task creator (non-blocking)
         try:
             from app.routes.notifications import notify_task_marked_done
             worker = User.query.get(current_user_id)
             worker_name = worker.name if worker else 'Worker'
-            notify_task_marked_done(task.creator_id, worker_name, task.title, task.id)
+            notify_task_marked_done(creator_id, worker_name, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
-            print(f"Notification error (non-critical): {notify_error}")
+            db.session.rollback()
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task marked as done. Waiting for creator confirmation.',
-            'task': task.to_dict()
+            'task': task_dict
         }), 200
     except Exception as e:
         db.session.rollback()
@@ -725,17 +764,23 @@ def confirm_task_completion(current_user_id, task_id):
         task.updated_at = datetime.utcnow()
         db.session.commit()
         
+        # Store values for notification and response
+        task_dict = task.to_dict()
+        worker_id = task.assigned_to_id
+        task_title = task.title
+        
         # Try to notify the worker (non-blocking)
         try:
             from app.routes.notifications import notify_task_completed
-            notify_task_completed(task.assigned_to_id, task.title, task.id)
+            notify_task_completed(worker_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
-            print(f"Notification error (non-critical): {notify_error}")
+            db.session.rollback()
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task completed! Both parties can now leave reviews.',
-            'task': task.to_dict()
+            'task': task_dict
         }), 200
     except Exception as e:
         db.session.rollback()
