@@ -1,4 +1,10 @@
-"""Review routes for ratings and feedback."""
+"""Review routes for ratings and feedback.
+
+REVIEWS ARE RESTRICTED TO COMPLETED TRANSACTIONS ONLY.
+Users can only review each other after:
+- Completing a task (client reviews worker, worker reviews client)
+- Completing a listing sale (buyer reviews seller, seller reviews buyer)
+"""
 
 from flask import Blueprint, request, jsonify, current_app
 from app import db
@@ -334,40 +340,89 @@ def get_user_review_stats(user_id):
         return jsonify({'error': str(e)}), 500
 
 
-@reviews_bp.route('', methods=['POST'])
+@reviews_bp.route('/can-review-user/<int:user_id>', methods=['GET'])
 @token_required
-def create_review(current_user_id):
-    """Create a new review (generic endpoint)."""
+def can_review_user(current_user_id, user_id):
+    """
+    Check if current user can review another user.
+    Returns list of completed transactions that allow reviewing.
+    
+    Reviews can only be left after completing a transaction together.
+    """
     try:
-        data = request.get_json()
+        if current_user_id == user_id:
+            return jsonify({
+                'can_review': False,
+                'reason': 'You cannot review yourself',
+                'reviewable_transactions': []
+            }), 200
         
-        if not data or not all(k in data for k in ['rating', 'reviewed_user_id']):
-            return jsonify({'error': 'Missing required fields'}), 400
+        # Find completed tasks where both users were involved
+        # Case 1: Current user was creator, other user was worker
+        tasks_as_creator = TaskRequest.query.filter(
+            TaskRequest.creator_id == current_user_id,
+            TaskRequest.assigned_to_id == user_id,
+            TaskRequest.status == 'completed'
+        ).all()
         
-        if not (1 <= data['rating'] <= 5):
-            return jsonify({'error': 'Rating must be between 1 and 5'}), 400
+        # Case 2: Current user was worker, other user was creator
+        tasks_as_worker = TaskRequest.query.filter(
+            TaskRequest.creator_id == user_id,
+            TaskRequest.assigned_to_id == current_user_id,
+            TaskRequest.status == 'completed'
+        ).all()
         
-        # Don't allow reviewing yourself
-        if current_user_id == data['reviewed_user_id']:
-            return jsonify({'error': 'You cannot review yourself'}), 400
+        reviewable_transactions = []
         
-        review = Review(
-            reviewer_id=current_user_id,
-            reviewed_user_id=data['reviewed_user_id'],
-            rating=data['rating'],
-            content=data.get('content'),
-            listing_id=data.get('listing_id'),
-            task_id=data.get('task_id'),
-            review_type=data.get('review_type')
-        )
+        # Check each task if already reviewed
+        for task in tasks_as_creator:
+            existing_review = Review.query.filter_by(
+                task_id=task.id,
+                reviewer_id=current_user_id
+            ).first()
+            
+            if not existing_review:
+                reviewable_transactions.append({
+                    'type': 'task',
+                    'id': task.id,
+                    'title': task.title,
+                    'completed_at': task.completed_at.isoformat() if task.completed_at else None,
+                    'your_role': 'client',
+                    'review_type': 'client_review'
+                })
         
-        db.session.add(review)
-        db.session.commit()
+        for task in tasks_as_worker:
+            existing_review = Review.query.filter_by(
+                task_id=task.id,
+                reviewer_id=current_user_id
+            ).first()
+            
+            if not existing_review:
+                reviewable_transactions.append({
+                    'type': 'task',
+                    'id': task.id,
+                    'title': task.title,
+                    'completed_at': task.completed_at.isoformat() if task.completed_at else None,
+                    'your_role': 'worker',
+                    'review_type': 'worker_review'
+                })
         
-        return jsonify({'message': 'Review created successfully', 'review': review.to_dict(), 'id': review.id}), 201
+        # TODO: Add listing transactions when implemented
+        
+        return jsonify({
+            'can_review': len(reviewable_transactions) > 0,
+            'reason': 'No completed transactions with this user' if not reviewable_transactions else None,
+            'reviewable_transactions': reviewable_transactions
+        }), 200
+        
     except Exception as e:
-        db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+# REMOVED: Generic POST /api/reviews endpoint
+# Reviews must now go through specific transaction endpoints:
+# - POST /api/reviews/task/<task_id> for task reviews
+# - POST /api/reviews/listing/<listing_id> for listing reviews (TODO)
 
 
 @reviews_bp.route('/<int:review_id>', methods=['GET'])
@@ -394,7 +449,7 @@ def get_review(review_id):
 @reviews_bp.route('/<int:review_id>', methods=['PUT'])
 @token_required
 def update_review(current_user_id, review_id):
-    """Update a review."""
+    """Update a review (only within 24 hours of creation)."""
     try:
         review = Review.query.get(review_id)
         if not review:
@@ -402,6 +457,11 @@ def update_review(current_user_id, review_id):
         
         if review.reviewer_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Check if review is within edit window (24 hours)
+        time_since_creation = datetime.utcnow() - review.created_at
+        if time_since_creation.total_seconds() > 86400:  # 24 hours
+            return jsonify({'error': 'Reviews can only be edited within 24 hours of creation'}), 400
         
         data = request.get_json()
         
@@ -425,7 +485,7 @@ def update_review(current_user_id, review_id):
 @reviews_bp.route('/<int:review_id>', methods=['DELETE'])
 @token_required
 def delete_review(current_user_id, review_id):
-    """Delete a review."""
+    """Delete a review (only within 24 hours of creation)."""
     try:
         review = Review.query.get(review_id)
         if not review:
@@ -433,6 +493,11 @@ def delete_review(current_user_id, review_id):
         
         if review.reviewer_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Check if review is within delete window (24 hours)
+        time_since_creation = datetime.utcnow() - review.created_at
+        if time_since_creation.total_seconds() > 86400:  # 24 hours
+            return jsonify({'error': 'Reviews can only be deleted within 24 hours of creation'}), 400
         
         db.session.delete(review)
         db.session.commit()
