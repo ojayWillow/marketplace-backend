@@ -32,29 +32,41 @@ class TaskRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
+    # Relationships with eager loading to prevent N+1 queries
+    creator = db.relationship(
+        'User',
+        foreign_keys=[creator_id],
+        backref=db.backref('created_tasks', lazy='dynamic'),
+        lazy='joined'
+    )
+    assigned_to = db.relationship(
+        'User',
+        foreign_keys=[assigned_to_id],
+        backref=db.backref('assigned_tasks', lazy='dynamic'),
+        lazy='joined'
+    )
+    
     def to_dict(self):
-        """Convert task request to dictionary."""
-        from app.models import User
+        """Convert task request to dictionary.
         
-        # Get creator name
+        Uses already-loaded relationships instead of making separate queries.
+        This eliminates the N+1 query problem.
+        """
+        # Get creator name from eager-loaded relationship (no extra query!)
         creator_name = None
-        if self.creator_id:
-            creator = User.query.get(self.creator_id)
-            if creator:
-                if creator.first_name and creator.last_name:
-                    creator_name = f"{creator.first_name} {creator.last_name}"
-                else:
-                    creator_name = creator.username
+        if self.creator:
+            if self.creator.first_name and self.creator.last_name:
+                creator_name = f"{self.creator.first_name} {self.creator.last_name}"
+            else:
+                creator_name = self.creator.username
         
-        # Get assigned user name
+        # Get assigned user name from eager-loaded relationship (no extra query!)
         assigned_to_name = None
-        if self.assigned_to_id:
-            assigned_user = User.query.get(self.assigned_to_id)
-            if assigned_user:
-                if assigned_user.first_name and assigned_user.last_name:
-                    assigned_to_name = f"{assigned_user.first_name} {assigned_user.last_name}"
-                else:
-                    assigned_to_name = assigned_user.username
+        if self.assigned_to:
+            if self.assigned_to.first_name and self.assigned_to.last_name:
+                assigned_to_name = f"{self.assigned_to.first_name} {self.assigned_to.last_name}"
+            else:
+                assigned_to_name = self.assigned_to.username
         
         return {
             'id': self.id,
