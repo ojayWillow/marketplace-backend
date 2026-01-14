@@ -176,6 +176,35 @@ def get_created_tasks(current_user_id):
         return jsonify({'error': str(e)}), 500
 
 
+@tasks_bp.route('/user/<int:user_id>', methods=['GET'])
+def get_user_tasks(user_id):
+    """Get open tasks by a specific user (public endpoint for profile view)."""
+    try:
+        lang = request.args.get('lang')
+        
+        # Check if user exists
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get only open tasks for this user (public profile shows only open tasks)
+        tasks = TaskRequest.query.filter_by(
+            creator_id=user_id,
+            status='open'
+        ).order_by(TaskRequest.created_at.desc()).all()
+        
+        tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in tasks]
+        
+        return jsonify({
+            'tasks': tasks_list,
+            'total': len(tasks),
+            'page': 1
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @tasks_bp.route('', methods=['GET'])
 def get_tasks():
     """Get task requests with filtering, geolocation, and optional translation.
