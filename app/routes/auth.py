@@ -2,7 +2,8 @@
 
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models import User, Review
+from app.models import User, Review, PasswordResetToken
+from app.services.email import email_service
 import os
 from datetime import datetime, timedelta
 import jwt
@@ -111,6 +112,97 @@ def login():
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    """
+    Request a password reset email.
+    Accepts email and sends reset link if user exists.
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'email' not in data:
+            return jsonify({'error': 'Email is required'}), 400
+        
+        email = data['email'].lower().strip()
+        user = User.query.filter_by(email=email).first()
+        
+        # Always return success to prevent email enumeration
+        # But only send email if user exists
+        if user:
+            # Generate reset token
+            reset_token = PasswordResetToken.generate_token(user.id)
+            
+            # Send reset email
+            email_service.send_password_reset_email(
+                to_email=user.email,
+                username=user.username,
+                reset_token=reset_token
+            )
+        
+        # Return success regardless of whether user exists
+        return jsonify({
+            'message': 'If an account with that email exists, we have sent a password reset link.'
+        }), 200
+        
+    except Exception as e:
+        print(f"[AUTH] Forgot password error: {str(e)}")
+        return jsonify({'error': 'Failed to process request'}), 500
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    """
+    Reset password using token from email.
+    Accepts token and new password.
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or not all(k in data for k in ['token', 'password']):
+            return jsonify({'error': 'Token and password are required'}), 400
+        
+        token = data['token']
+        new_password = data['password']
+        
+        # Validate password length
+        if len(new_password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
+        # Verify token and get user_id
+        user_id = PasswordResetToken.verify_token(token)
+        
+        if not user_id:
+            return jsonify({'error': 'Invalid or expired reset link'}), 400
+        
+        # Get user and update password
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if not user.is_active:
+            return jsonify({'error': 'Account is disabled'}), 403
+        
+        # Update password
+        user.set_password(new_password)
+        user.updated_at = datetime.utcnow()
+        
+        # Mark token as used
+        PasswordResetToken.use_token(token)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Password has been reset successfully'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"[AUTH] Reset password error: {str(e)}")
+        return jsonify({'error': 'Failed to reset password'}), 500
 
 
 @auth_bp.route('/profile', methods=['GET'])
