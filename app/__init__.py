@@ -1,16 +1,17 @@
 from flask import Flask, jsonify, request, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager, get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 import os
+import jwt
 from dotenv import load_dotenv
 
 load_dotenv()
 
 db = SQLAlchemy()
 migrate = Migrate()
-jwt = JWTManager()
+jwt_manager = JWTManager()
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -51,7 +52,7 @@ def create_app(config_name=None):
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
-    jwt.init_app(app)
+    jwt_manager.init_app(app)
     
     # Auto-create tables and constraints on startup
     with app.app_context():
@@ -92,16 +93,29 @@ def create_app(config_name=None):
         
         # Try to get authenticated user and update last_seen
         try:
-            verify_jwt_in_request(optional=True)
-            user_id = get_jwt_identity()
+            auth_header = request.headers.get('Authorization')
+            if not auth_header:
+                return
+            
+            # Extract token from "Bearer <token>"
+            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
+            
+            # Decode using the same method as route decorators
+            secret_key = app.config['JWT_SECRET_KEY']
+            payload = jwt.decode(token, secret_key, algorithms=['HS256'])
+            user_id = payload.get('user_id')
+            
             if user_id:
                 from app.models import User
                 user = User.query.get(user_id)
                 if user:
                     user.update_last_seen()
                     db.session.commit()
+        except jwt.ExpiredSignatureError:
+            # Token expired - don't update last_seen, but don't break request
+            pass
         except Exception:
-            # Silently ignore errors - don't break the request
+            # Silently ignore other errors - don't break the request
             pass
     
     # Health check route with debug info
