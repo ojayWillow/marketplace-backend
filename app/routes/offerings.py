@@ -68,6 +68,44 @@ def token_optional(f):
     return decorated
 
 
+def get_bounding_box(lat, lng, radius_km):
+    """
+    Calculate a bounding box for a given center point and radius.
+    
+    This creates a square approximation that can be used for fast
+    SQL filtering before applying precise Haversine distance.
+    
+    Args:
+        lat: Center latitude in degrees
+        lng: Center longitude in degrees  
+        radius_km: Radius in kilometers
+    
+    Returns:
+        Tuple of (min_lat, max_lat, min_lng, max_lng)
+    """
+    # Earth's radius in km
+    R = 6371.0
+    
+    # Convert radius to degrees (approximate)
+    # 1 degree latitude = ~111km
+    lat_delta = radius_km / 111.0
+    
+    # 1 degree longitude varies by latitude
+    # At equator: ~111km, at poles: 0km
+    lng_delta = radius_km / (111.0 * cos(radians(lat)))
+    
+    # Add 10% buffer to ensure we don't miss edge cases
+    lat_delta *= 1.1
+    lng_delta *= 1.1
+    
+    return (
+        lat - lat_delta,  # min_lat
+        lat + lat_delta,  # max_lat
+        lng - lng_delta,  # min_lng
+        lng + lng_delta   # max_lng
+    )
+
+
 def haversine_distance(lat1, lon1, lat2, lon2):
     """Calculate the distance between two points on Earth using Haversine formula."""
     R = 6371  # Earth's radius in kilometers
@@ -129,16 +167,27 @@ def get_offerings():
                 Offering.boost_expires_at > datetime.utcnow()
             )
         
+        # Apply bounding box filter in SQL if coordinates provided
+        # This dramatically reduces the number of rows loaded into memory
+        if latitude is not None and longitude is not None:
+            min_lat, max_lat, min_lng, max_lng = get_bounding_box(latitude, longitude, radius)
+            query = query.filter(
+                Offering.latitude >= min_lat,
+                Offering.latitude <= max_lat,
+                Offering.longitude >= min_lng,
+                Offering.longitude <= max_lng
+            )
+        
         # Order: boosted first, then by newest
         query = query.order_by(
             Offering.is_boosted.desc(),
             Offering.created_at.desc()
         )
         
-        # Execute query
+        # Execute query - now only fetches offerings within bounding box
         offerings = query.all()
         
-        # Filter by distance if coordinates provided
+        # Filter by precise distance if coordinates provided
         if latitude is not None and longitude is not None:
             filtered_offerings = []
             for offering in offerings:
@@ -146,6 +195,7 @@ def get_offerings():
                     latitude, longitude,
                     offering.latitude, offering.longitude
                 )
+                # Apply exact radius filter (bounding box is approximate)
                 if distance <= radius:
                     offering_dict = offering.to_dict()
                     offering_dict['distance'] = round(distance, 2)
