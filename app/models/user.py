@@ -40,10 +40,12 @@ class User(db.Model):
     latitude = db.Column(db.Float, nullable=True)  # User's location latitude
     longitude = db.Column(db.Float, nullable=True)  # User's location longitude
     
-    # Relationships
-    listings = db.relationship('Listing', backref='seller', lazy=True, foreign_keys='Listing.seller_id')
-    task_requests = db.relationship('TaskRequest', backref='creator', lazy=True, foreign_keys='TaskRequest.creator_id')
-    assigned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy=True, foreign_keys='TaskRequest.assigned_to_id')
+    # Relationships - using lazy='joined' for eager loading to prevent N+1 queries
+    # Note: For task lists, we query TaskRequest directly, so we keep these as lazy='dynamic'
+    # to avoid loading all user's tasks when we just need the user info
+    listings = db.relationship('Listing', backref='seller', lazy='dynamic', foreign_keys='Listing.seller_id')
+    task_requests = db.relationship('TaskRequest', backref='creator', lazy='dynamic', foreign_keys='TaskRequest.creator_id')
+    assigned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy='dynamic', foreign_keys='TaskRequest.assigned_to_id')
     
     def set_password(self, password):
         """Hash and set the user password."""

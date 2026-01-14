@@ -1,6 +1,7 @@
 """Task request routes for quick help services marketplace."""
 
 from flask import Blueprint, request, jsonify
+from sqlalchemy.orm import joinedload
 from app import db
 from app.models import TaskRequest, User, TaskApplication
 from datetime import datetime
@@ -36,6 +37,23 @@ def token_required(f):
         
         return f(current_user_id, *args, **kwargs)
     return decorated
+
+
+def get_bounding_box(lat, lng, radius_km):
+    """
+    Calculate a bounding box for SQL filtering.
+    Returns (min_lat, max_lat, min_lng, max_lng).
+    """
+    # Approximate degrees per km at this latitude
+    lat_delta = radius_km / 111.0  # ~111 km per degree latitude
+    lng_delta = radius_km / (111.0 * cos(radians(lat)))  # Adjust for longitude
+    
+    return (
+        lat - lat_delta,  # min_lat
+        lat + lat_delta,  # max_lat
+        lng - lng_delta,  # min_lng
+        lng + lng_delta   # max_lng
+    )
 
 
 def distance(lat1, lon1, lat2, lon2):
@@ -131,7 +149,11 @@ def get_my_tasks(current_user_id):
     try:
         lang = request.args.get('lang')
         
-        my_tasks = TaskRequest.query.filter(
+        # Use eager loading to prevent N+1 queries
+        my_tasks = TaskRequest.query.options(
+            joinedload(TaskRequest.creator),
+            joinedload(TaskRequest.assigned_user)
+        ).filter(
             TaskRequest.assigned_to_id == current_user_id,
             TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation', 'completed'])
         ).order_by(TaskRequest.created_at.desc()).all()
@@ -153,7 +175,11 @@ def get_created_tasks(current_user_id):
     try:
         lang = request.args.get('lang')
         
-        created_tasks = TaskRequest.query.filter(
+        # Use eager loading to prevent N+1 queries
+        created_tasks = TaskRequest.query.options(
+            joinedload(TaskRequest.creator),
+            joinedload(TaskRequest.assigned_user)
+        ).filter(
             TaskRequest.creator_id == current_user_id
         ).order_by(TaskRequest.created_at.desc()).all()
         
@@ -188,7 +214,11 @@ def get_user_tasks(user_id):
             return jsonify({'error': 'User not found'}), 404
         
         # Get only open tasks for this user (public profile shows only open tasks)
-        tasks = TaskRequest.query.filter_by(
+        # Use eager loading to prevent N+1 queries
+        tasks = TaskRequest.query.options(
+            joinedload(TaskRequest.creator),
+            joinedload(TaskRequest.assigned_user)
+        ).filter_by(
             creator_id=user_id,
             status='open'
         ).order_by(TaskRequest.created_at.desc()).all()
@@ -227,28 +257,34 @@ def get_tasks():
         radius = request.args.get('radius', 10, type=float)
         lang = request.args.get('lang')  # Language for translation
         
-        # Build base query
-        query = TaskRequest.query.filter_by(status=status)
+        # Build base query with eager loading to prevent N+1 queries
+        query = TaskRequest.query.options(
+            joinedload(TaskRequest.creator),
+            joinedload(TaskRequest.assigned_user)
+        ).filter_by(status=status)
         
         if category:
             query = query.filter_by(category=category)
         
-        # If location filtering is requested, we need to:
-        # 1. Get ALL matching tasks first
-        # 2. Filter by distance
-        # 3. Sort by distance
-        # 4. Then apply pagination manually
+        # If location filtering is requested
         if latitude is not None and longitude is not None:
-            # Get all tasks matching status/category (no pagination yet)
+            # Apply bounding box filter in SQL first (faster than loading all)
+            min_lat, max_lat, min_lng, max_lng = get_bounding_box(latitude, longitude, radius)
+            query = query.filter(
+                TaskRequest.latitude.isnot(None),
+                TaskRequest.longitude.isnot(None),
+                TaskRequest.latitude >= min_lat,
+                TaskRequest.latitude <= max_lat,
+                TaskRequest.longitude >= min_lng,
+                TaskRequest.longitude <= max_lng
+            )
+            
+            # Get tasks from bounding box (much smaller set)
             all_tasks = query.all()
             
-            # Filter by distance and calculate distance for each
+            # Filter by exact distance and calculate distance for each
             tasks_with_distance = []
             for task in all_tasks:
-                # Skip tasks without valid coordinates
-                if task.latitude is None or task.longitude is None:
-                    continue
-                    
                 dist = distance(latitude, longitude, task.latitude, task.longitude)
                 if dist <= radius:
                     task_dict = task.to_dict()
@@ -304,7 +340,11 @@ def get_task(task_id):
     try:
         lang = request.args.get('lang')
         
-        task = TaskRequest.query.get(task_id)
+        # Use eager loading to prevent N+1 queries
+        task = TaskRequest.query.options(
+            joinedload(TaskRequest.creator),
+            joinedload(TaskRequest.assigned_user)
+        ).get(task_id)
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
