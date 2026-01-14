@@ -34,7 +34,7 @@ class EmailService:
             server.login(self.smtp_user, self.smtp_password)
         return server
     
-    def send_email(self, to_email, subject, html_content, text_content=None):
+    def send_email(self, to_email, subject, html_content, text_content=None, debug_info=None):
         """
         Send an email.
         
@@ -43,6 +43,7 @@ class EmailService:
             subject: Email subject
             html_content: HTML body content
             text_content: Plain text fallback (optional)
+            debug_info: Extra info to print in dev mode (optional)
         
         Returns:
             bool: True if sent successfully, False otherwise
@@ -50,8 +51,14 @@ class EmailService:
         try:
             # Check if email is configured
             if not self.smtp_user or not self.smtp_password:
-                print(f"[EMAIL] SMTP not configured. Would send to {to_email}: {subject}")
-                print(f"[EMAIL] Set SMTP_USER and SMTP_PASSWORD environment variables.")
+                print(f"\n{'='*60}")
+                print(f"[EMAIL] SMTP not configured - DEV MODE")
+                print(f"{'='*60}")
+                print(f"To: {to_email}")
+                print(f"Subject: {subject}")
+                if debug_info:
+                    print(f"\n{debug_info}")
+                print(f"{'='*60}\n")
                 return True  # Return True in dev mode so the flow continues
             
             msg = MIMEMultipart('alternative')
@@ -93,6 +100,9 @@ class EmailService:
         reset_link = f"{self.frontend_url}/reset-password?token={reset_token}"
         
         subject = "Reset Your Password - Marketplace"
+        
+        # Debug info for dev mode
+        debug_info = f"PASSWORD RESET LINK:\n{reset_link}"
         
         html_content = f"""
         <!DOCTYPE html>
@@ -147,7 +157,7 @@ class EmailService:
         - Marketplace Team
         """
         
-        return self.send_email(to_email, subject, html_content, text_content)
+        return self.send_email(to_email, subject, html_content, text_content, debug_info)
 
 
 # Singleton instance
