@@ -18,6 +18,9 @@ reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
 # Use JWT_SECRET_KEY to match auth routes
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
+# Minimum characters required for review content
+MIN_REVIEW_CONTENT_LENGTH = 10
+
 # JWT token verification
 def token_required(f):
     @wraps(f)
@@ -204,7 +207,8 @@ def can_review_task(current_user_id, task_id):
                 'username': reviewee.username,
                 'profile_picture_url': reviewee.profile_picture_url
             } if reviewee else None,
-            'task': task.to_dict()
+            'task': task.to_dict(),
+            'min_content_length': MIN_REVIEW_CONTENT_LENGTH
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -240,11 +244,24 @@ def create_task_review(current_user_id, task_id):
         
         data = request.get_json()
         
+        # Validate rating
         if not data or 'rating' not in data:
             return jsonify({'error': 'Rating is required'}), 400
         
         if not (1 <= data['rating'] <= 5):
             return jsonify({'error': 'Rating must be between 1 and 5'}), 400
+        
+        # Validate content - now required with minimum length
+        content = data.get('content', '').strip()
+        if not content:
+            return jsonify({'error': 'Please write a review to share your experience'}), 400
+        
+        if len(content) < MIN_REVIEW_CONTENT_LENGTH:
+            return jsonify({
+                'error': f'Review must be at least {MIN_REVIEW_CONTENT_LENGTH} characters long',
+                'min_length': MIN_REVIEW_CONTENT_LENGTH,
+                'current_length': len(content)
+            }), 400
         
         # Determine review type and reviewee
         if is_creator:
@@ -258,7 +275,7 @@ def create_task_review(current_user_id, task_id):
             reviewer_id=current_user_id,
             reviewed_user_id=reviewed_user_id,
             rating=data['rating'],
-            content=data.get('content', ''),
+            content=content,
             task_id=task_id,
             review_type=review_type
         )
@@ -471,7 +488,14 @@ def update_review(current_user_id, review_id):
             review.rating = data['rating']
         
         if 'content' in data:
-            review.content = data['content']
+            content = data['content'].strip()
+            if len(content) < MIN_REVIEW_CONTENT_LENGTH:
+                return jsonify({
+                    'error': f'Review must be at least {MIN_REVIEW_CONTENT_LENGTH} characters long',
+                    'min_length': MIN_REVIEW_CONTENT_LENGTH,
+                    'current_length': len(content)
+                }), 400
+            review.content = content
         
         review.updated_at = datetime.utcnow()
         db.session.commit()
