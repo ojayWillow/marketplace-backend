@@ -11,6 +11,15 @@ GOOGLE_API_KEY = os.environ.get('GOOGLE_TRANSLATE_API_KEY', '')
 SUPPORTED_LANGUAGES = ['lv', 'en', 'ru']
 
 
+def is_translation_enabled() -> bool:
+    """Check if translation is properly configured."""
+    if TRANSLATION_SERVICE == 'google':
+        return bool(GOOGLE_API_KEY and GOOGLE_API_KEY.strip())
+    elif TRANSLATION_SERVICE == 'deepl':
+        return bool(os.environ.get('DEEPL_API_KEY', '').strip())
+    return False
+
+
 def get_text_hash(text: str) -> str:
     """Generate a hash for the text to use as cache key."""
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -57,7 +66,7 @@ def cache_translation(text: str, source_lang: str, target_lang: str, translated_
 def google_translate(text: str, target_lang: str) -> tuple[str, str]:
     """Translate using Google Cloud Translation API."""
     if not GOOGLE_API_KEY:
-        print("Google Translate: No API key configured")
+        # No API key - return original text immediately (no network call)
         return text, 'en'
     
     url = 'https://translation.googleapis.com/language/translate/v2'
@@ -88,6 +97,7 @@ def deepl_translate(text: str, target_lang: str) -> tuple[str, str]:
     """Translate using DeepL API (for future use)."""
     deepl_key = os.environ.get('DEEPL_API_KEY', '')
     if not deepl_key:
+        # No API key - return original text immediately (no network call)
         return text, 'en'
     
     # DeepL uses uppercase language codes
@@ -127,6 +137,10 @@ def translate_text(text: str, target_lang: str) -> str:
         Translated text
     """
     if not text or not text.strip():
+        return text
+    
+    # Skip translation entirely if not configured (fast path)
+    if not is_translation_enabled():
         return text
     
     # Normalize language code
