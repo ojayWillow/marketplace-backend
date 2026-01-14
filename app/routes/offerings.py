@@ -203,6 +203,35 @@ def get_my_offerings():
         return jsonify({'error': str(e)}), 500
 
 
+@offerings_bp.route('/user/<int:user_id>', methods=['GET'])
+def get_user_offerings(user_id):
+    """Get active offerings by a specific user (public endpoint for profile view)."""
+    try:
+        lang = request.args.get('lang')
+        
+        # Check if user exists
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get only active offerings for this user
+        offerings = Offering.query.filter_by(
+            creator_id=user_id,
+            status='active'
+        ).order_by(Offering.created_at.desc()).all()
+        
+        offerings_list = [translate_offering_if_needed(o.to_dict(), lang) for o in offerings]
+        
+        return jsonify({
+            'offerings': offerings_list,
+            'total': len(offerings),
+            'page': 1
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @offerings_bp.route('/<int:offering_id>', methods=['GET'])
 @token_optional
 def get_offering(offering_id):
