@@ -34,8 +34,8 @@ class Offering(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
-    # Relationship to creator
-    creator = db.relationship('User', backref=db.backref('offerings', lazy='dynamic'))
+    # Relationship to creator - use joined load for eager loading
+    creator = db.relationship('User', backref=db.backref('offerings', lazy='dynamic'), lazy='joined')
     
     def is_boost_active(self):
         """Check if the boost is currently active (not expired)."""
@@ -46,28 +46,30 @@ class Offering(db.Model):
         return datetime.utcnow() < self.boost_expires_at
     
     def to_dict(self):
-        """Convert offering to dictionary."""
-        from app.models import User
+        """Convert offering to dictionary.
         
-        # Get creator info
+        Uses the already-loaded creator relationship instead of making
+        a separate query. This eliminates N+1 query problem.
+        """
+        # Get creator info from already-loaded relationship (no extra query!)
         creator_name = None
         creator_avatar = None
         creator_rating = None
         creator_review_count = 0
         creator_completed_tasks = 0
         
-        if self.creator_id:
-            creator = User.query.get(self.creator_id)
-            if creator:
-                if creator.first_name and creator.last_name:
-                    creator_name = f"{creator.first_name} {creator.last_name}"
-                else:
-                    creator_name = creator.username
-                # Use correct field names from User model
-                creator_avatar = creator.avatar_url or creator.profile_picture_url
-                creator_rating = creator.reputation_score or 0
-                creator_review_count = 0  # User model doesn't have review_count
-                creator_completed_tasks = int(creator.completion_rate) if creator.completion_rate else 0
+        # Use self.creator which is already loaded via eager loading
+        if self.creator:
+            creator = self.creator
+            if creator.first_name and creator.last_name:
+                creator_name = f"{creator.first_name} {creator.last_name}"
+            else:
+                creator_name = creator.username
+            # Use correct field names from User model
+            creator_avatar = creator.avatar_url or creator.profile_picture_url
+            creator_rating = creator.reputation_score or 0
+            creator_review_count = 0  # User model doesn't have review_count
+            creator_completed_tasks = int(creator.completion_rate) if creator.completion_rate else 0
         
         return {
             'id': self.id,
