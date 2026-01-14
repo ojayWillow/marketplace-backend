@@ -32,41 +32,42 @@ class TaskRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
-    # Relationships with eager loading to prevent N+1 queries
-    creator = db.relationship(
-        'User',
-        foreign_keys=[creator_id],
-        backref=db.backref('created_tasks', lazy='dynamic'),
-        lazy='joined'
-    )
-    assigned_to = db.relationship(
-        'User',
-        foreign_keys=[assigned_to_id],
-        backref=db.backref('assigned_tasks', lazy='dynamic'),
-        lazy='joined'
-    )
+    # Note: Relationships are defined in User model with eager loading.
+    # Use self.creator and self.assigned_user (backref names from User model)
     
     def to_dict(self):
         """Convert task request to dictionary.
         
-        Uses already-loaded relationships instead of making separate queries.
-        This eliminates the N+1 query problem.
+        Uses relationships defined in User model to avoid N+1 queries.
+        The User model defines these with backref names 'creator' and 'assigned_user'.
         """
-        # Get creator name from eager-loaded relationship (no extra query!)
-        creator_name = None
-        if self.creator:
-            if self.creator.first_name and self.creator.last_name:
-                creator_name = f"{self.creator.first_name} {self.creator.last_name}"
-            else:
-                creator_name = self.creator.username
+        from app.models import User
         
-        # Get assigned user name from eager-loaded relationship (no extra query!)
+        # Get creator name - try relationship first, fallback to query
+        creator_name = None
+        if self.creator_id:
+            # Use the relationship if available (eager loaded from User model)
+            creator = getattr(self, 'creator', None)
+            if creator is None:
+                creator = User.query.get(self.creator_id)
+            if creator:
+                if creator.first_name and creator.last_name:
+                    creator_name = f"{creator.first_name} {creator.last_name}"
+                else:
+                    creator_name = creator.username
+        
+        # Get assigned user name - try relationship first, fallback to query
         assigned_to_name = None
-        if self.assigned_to:
-            if self.assigned_to.first_name and self.assigned_to.last_name:
-                assigned_to_name = f"{self.assigned_to.first_name} {self.assigned_to.last_name}"
-            else:
-                assigned_to_name = self.assigned_to.username
+        if self.assigned_to_id:
+            # Use the relationship if available (eager loaded from User model)
+            assigned_user = getattr(self, 'assigned_user', None)
+            if assigned_user is None:
+                assigned_user = User.query.get(self.assigned_to_id)
+            if assigned_user:
+                if assigned_user.first_name and assigned_user.last_name:
+                    assigned_to_name = f"{assigned_user.first_name} {assigned_user.last_name}"
+                else:
+                    assigned_to_name = assigned_user.username
         
         return {
             'id': self.id,
