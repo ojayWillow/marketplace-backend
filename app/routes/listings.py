@@ -84,6 +84,37 @@ def get_my_listings(current_user_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@listings_bp.route('/user/<int:user_id>', methods=['GET'])
+def get_user_listings(user_id):
+    """Get active listings by a specific user (public endpoint for profile view)."""
+    try:
+        # Check if user exists
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        # Get only active listings for this user
+        query = Listing.query.filter_by(
+            seller_id=user_id,
+            status='active'
+        ).order_by(Listing.created_at.desc())
+        
+        listings = query.paginate(page=page, per_page=per_page)
+        
+        return jsonify({
+            'listings': [listing.to_dict() for listing in listings.items],
+            'total': listings.total,
+            'pages': listings.pages,
+            'current_page': page
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @listings_bp.route('/<int:listing_id>', methods=['GET'])
 def get_listing(listing_id):
     """Get a specific listing by ID with seller details."""
