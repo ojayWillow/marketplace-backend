@@ -7,6 +7,7 @@ from app.services.email import email_service
 import os
 from datetime import datetime, timedelta
 import jwt
+import traceback
 from functools import wraps
 from sqlalchemy.orm import joinedload
 
@@ -122,26 +123,40 @@ def forgot_password():
     Accepts email and sends reset link if user exists.
     """
     try:
+        print("[AUTH] forgot-password endpoint called")
         data = request.get_json()
+        print(f"[AUTH] Request data: {data}")
         
         if not data or 'email' not in data:
             return jsonify({'error': 'Email is required'}), 400
         
         email = data['email'].lower().strip()
+        print(f"[AUTH] Looking up user with email: {email}")
+        
         user = User.query.filter_by(email=email).first()
+        print(f"[AUTH] User found: {user is not None}")
         
         # Always return success to prevent email enumeration
         # But only send email if user exists
         if user:
-            # Generate reset token
-            reset_token = PasswordResetToken.generate_token(user.id)
-            
-            # Send reset email
-            email_service.send_password_reset_email(
-                to_email=user.email,
-                username=user.username,
-                reset_token=reset_token
-            )
+            try:
+                print(f"[AUTH] Generating reset token for user_id: {user.id}")
+                # Generate reset token
+                reset_token = PasswordResetToken.generate_token(user.id)
+                print(f"[AUTH] Reset token generated successfully")
+                
+                # Send reset email
+                print(f"[AUTH] Sending password reset email...")
+                email_service.send_password_reset_email(
+                    to_email=user.email,
+                    username=user.username,
+                    reset_token=reset_token
+                )
+                print(f"[AUTH] Email send completed")
+            except Exception as inner_e:
+                print(f"[AUTH] Error in token/email process: {str(inner_e)}")
+                print(traceback.format_exc())
+                # Don't raise - still return success to prevent email enumeration
         
         # Return success regardless of whether user exists
         return jsonify({
@@ -150,6 +165,7 @@ def forgot_password():
         
     except Exception as e:
         print(f"[AUTH] Forgot password error: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({'error': 'Failed to process request'}), 500
 
 
