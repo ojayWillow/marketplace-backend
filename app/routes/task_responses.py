@@ -2,6 +2,11 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import TaskResponse, TaskRequest, User
+from app.services.push_notifications import (
+    notify_application_received,
+    notify_application_accepted,
+    notify_application_rejected
+)
 from functools import wraps
 import jwt
 from datetime import datetime
@@ -82,6 +87,22 @@ def create_task_response(current_user_id):
         db.session.add(response)
         db.session.commit()
         
+        # Send push notification to task owner about new application
+        try:
+            applicant = User.query.get(current_user_id)
+            applicant_name = applicant.name if applicant else 'Someone'
+            task_title = task.title or 'your task'
+            
+            notify_application_received(
+                task_owner_id=task.creator_id,
+                applicant_name=applicant_name,
+                task_title=task_title,
+                task_id=task.id
+            )
+        except Exception as push_error:
+            # Don't fail the request if push notification fails
+            print(f'Push notification error: {push_error}')
+        
         return jsonify({'message': 'Task response created', 'response': response.to_dict()}), 201
     except Exception as e:
         db.session.rollback()
@@ -115,6 +136,9 @@ def update_task_response(current_user_id, response_id):
         
         data = request.get_json()
         
+        # Track if acceptance status changed for push notification
+        was_accepted = response.is_accepted
+        
         if 'is_accepted' in data:
             response.is_accepted = data['is_accepted']
             if data['is_accepted']:
@@ -125,6 +149,34 @@ def update_task_response(current_user_id, response_id):
         
         response.updated_at = datetime.utcnow()
         db.session.commit()
+        
+        # Send push notification based on acceptance/rejection
+        try:
+            task_title = task.title or 'a task'
+            
+            if 'is_accepted' in data:
+                if data['is_accepted'] and not was_accepted:
+                    # Application was accepted
+                    notify_application_accepted(
+                        applicant_id=response.user_id,
+                        task_title=task_title,
+                        task_id=task.id
+                    )
+                elif not data['is_accepted'] and was_accepted:
+                    # Application was rejected (previously accepted, now not)
+                    notify_application_rejected(
+                        applicant_id=response.user_id,
+                        task_title=task_title
+                    )
+                elif not data['is_accepted'] and not was_accepted:
+                    # Explicitly rejecting a pending application
+                    notify_application_rejected(
+                        applicant_id=response.user_id,
+                        task_title=task_title
+                    )
+        except Exception as push_error:
+            # Don't fail the request if push notification fails
+            print(f'Push notification error: {push_error}')
         
         return jsonify({'message': 'Response updated', 'response': response.to_dict()}), 200
     except Exception as e:
