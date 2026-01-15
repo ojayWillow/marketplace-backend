@@ -1,45 +1,25 @@
-"""Email service for sending transactional emails."""
+"""Email service for sending transactional emails using Resend."""
 
 import os
-import smtplib
-import socket
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
+import requests
 
 
 class EmailService:
     """
     Email service for sending transactional emails.
-    
-    Supports multiple providers:
-    - SMTP (Gmail, Outlook, custom SMTP servers)
-    - Can be extended for SendGrid, Mailgun, etc.
+    Uses Resend API for reliable email delivery.
     """
     
     def __init__(self):
-        self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        self.smtp_user = os.getenv('SMTP_USER', '')
-        self.smtp_password = os.getenv('SMTP_PASSWORD', '')
-        self.from_email = os.getenv('FROM_EMAIL', self.smtp_user)
+        self.resend_api_key = os.getenv('RESEND_API_KEY', '')
+        self.from_email = os.getenv('FROM_EMAIL', 'onboarding@resend.dev')
         self.from_name = os.getenv('FROM_NAME', 'Marketplace')
         self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
-        # Timeout for SMTP operations (in seconds)
-        self.smtp_timeout = int(os.getenv('SMTP_TIMEOUT', '10'))
-    
-    def _create_connection(self):
-        """Create SMTP connection with timeout."""
-        server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
-        server.starttls()
-        if self.smtp_user and self.smtp_password:
-            server.login(self.smtp_user, self.smtp_password)
-        return server
+        self.resend_api_url = 'https://api.resend.com/emails'
     
     def send_email(self, to_email, subject, html_content, text_content=None, debug_info=None):
         """
-        Send an email.
+        Send an email using Resend API.
         
         Args:
             to_email: Recipient email address
@@ -52,10 +32,10 @@ class EmailService:
             bool: True if sent successfully, False otherwise
         """
         try:
-            # Check if email is configured
-            if not self.smtp_user or not self.smtp_password:
+            # Check if Resend is configured
+            if not self.resend_api_key:
                 print(f"\n{'='*60}")
-                print(f"[EMAIL] SMTP not configured - DEV MODE")
+                print(f"[EMAIL] Resend API not configured - DEV MODE")
                 print(f"{'='*60}")
                 print(f"To: {to_email}")
                 print(f"Subject: {subject}")
@@ -64,43 +44,42 @@ class EmailService:
                 print(f"{'='*60}\n")
                 return True  # Return True in dev mode so the flow continues
             
-            print(f"[EMAIL] Attempting to send email to {to_email}")
-            print(f"[EMAIL] SMTP Host: {self.smtp_host}:{self.smtp_port}")
-            print(f"[EMAIL] SMTP User: {self.smtp_user}")
-            print(f"[EMAIL] Timeout: {self.smtp_timeout}s")
+            print(f"[EMAIL] Sending email via Resend to {to_email}")
             
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = f"{self.from_name} <{self.from_email}>"
-            msg['To'] = to_email
+            # Prepare the request
+            headers = {
+                'Authorization': f'Bearer {self.resend_api_key}',
+                'Content-Type': 'application/json'
+            }
             
-            # Add plain text version
+            payload = {
+                'from': f'{self.from_name} <{self.from_email}>',
+                'to': [to_email],
+                'subject': subject,
+                'html': html_content
+            }
+            
             if text_content:
-                msg.attach(MIMEText(text_content, 'plain'))
+                payload['text'] = text_content
             
-            # Add HTML version
-            msg.attach(MIMEText(html_content, 'html'))
+            # Send via Resend API
+            response = requests.post(
+                self.resend_api_url,
+                headers=headers,
+                json=payload,
+                timeout=10
+            )
             
-            # Send email with timeout protection
-            print(f"[EMAIL] Connecting to SMTP server...")
-            server = self._create_connection()
-            print(f"[EMAIL] Connected, sending email...")
-            server.sendmail(self.from_email, to_email, msg.as_string())
-            server.quit()
+            if response.status_code == 200:
+                result = response.json()
+                print(f"[EMAIL] Successfully sent email to {to_email}, ID: {result.get('id')}")
+                return True
+            else:
+                print(f"[EMAIL] Resend API error: {response.status_code} - {response.text}")
+                return False
             
-            print(f"[EMAIL] Successfully sent email to {to_email}")
-            return True
-            
-        except socket.timeout:
-            print(f"[EMAIL] SMTP connection timed out after {self.smtp_timeout}s")
-            return False
-        except smtplib.SMTPAuthenticationError as e:
-            print(f"[EMAIL] SMTP Authentication failed: {str(e)}")
-            print(f"[EMAIL] Make sure you're using a Gmail App Password, not your regular password")
-            print(f"[EMAIL] Get an App Password at: https://myaccount.google.com/apppasswords")
-            return False
-        except smtplib.SMTPException as e:
-            print(f"[EMAIL] SMTP error: {str(e)}")
+        except requests.exceptions.Timeout:
+            print(f"[EMAIL] Resend API request timed out")
             return False
         except Exception as e:
             print(f"[EMAIL] Failed to send email to {to_email}: {str(e)}")
