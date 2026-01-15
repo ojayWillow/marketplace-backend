@@ -78,6 +78,9 @@ def create_conversation(current_user_id):
         if not other_user:
             return jsonify({'error': 'User not found'}), 404
         
+        # Get sender for push notification
+        sender = User.query.get(current_user_id)
+        
         # Check if conversation already exists between these users
         existing_conversation = Conversation.query.filter(
             or_(
@@ -103,6 +106,19 @@ def create_conversation(current_user_id):
                 db.session.add(message)
                 existing_conversation.updated_at = datetime.utcnow()
                 db.session.commit()
+                
+                # Send push notification for the message
+                try:
+                    from app.services.push_notifications import notify_new_message
+                    sender_name = sender.name or sender.username or 'Someone'
+                    notify_new_message(
+                        recipient_id=other_user_id,
+                        sender_name=sender_name,
+                        message_preview=initial_message,
+                        conversation_id=existing_conversation.id
+                    )
+                except Exception as push_error:
+                    print(f'Push notification error: {push_error}')
             
             return jsonify({
                 'conversation': existing_conversation.to_dict(current_user_id),
@@ -129,6 +145,20 @@ def create_conversation(current_user_id):
             db.session.add(message)
         
         db.session.commit()
+        
+        # Send push notification for initial message
+        if initial_message:
+            try:
+                from app.services.push_notifications import notify_new_message
+                sender_name = sender.name or sender.username or 'Someone'
+                notify_new_message(
+                    recipient_id=other_user_id,
+                    sender_name=sender_name,
+                    message_preview=initial_message,
+                    conversation_id=conversation.id
+                )
+            except Exception as push_error:
+                print(f'Push notification error: {push_error}')
         
         return jsonify({
             'conversation': conversation.to_dict(current_user_id),
@@ -243,6 +273,31 @@ def send_message(current_user_id, conversation_id):
         conversation.updated_at = datetime.utcnow()
         
         db.session.commit()
+        
+        # Send push notification to the other participant
+        try:
+            from app.services.push_notifications import notify_new_message
+            
+            # Determine recipient (the other participant)
+            recipient_id = (
+                conversation.participant_2_id 
+                if conversation.participant_1_id == current_user_id 
+                else conversation.participant_1_id
+            )
+            
+            # Get sender name
+            sender = User.query.get(current_user_id)
+            sender_name = sender.name or sender.username or 'Someone'
+            
+            notify_new_message(
+                recipient_id=recipient_id,
+                sender_name=sender_name,
+                message_preview=content,
+                conversation_id=conversation_id
+            )
+        except Exception as push_error:
+            # Don't fail the request if push fails
+            print(f'Push notification error: {push_error}')
         
         return jsonify({
             'message': message.to_dict()
