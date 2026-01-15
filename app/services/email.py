@@ -2,6 +2,7 @@
 
 import os
 import smtplib
+import socket
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -25,10 +26,12 @@ class EmailService:
         self.from_email = os.getenv('FROM_EMAIL', self.smtp_user)
         self.from_name = os.getenv('FROM_NAME', 'Marketplace')
         self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        # Timeout for SMTP operations (in seconds)
+        self.smtp_timeout = int(os.getenv('SMTP_TIMEOUT', '10'))
     
     def _create_connection(self):
-        """Create SMTP connection."""
-        server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+        """Create SMTP connection with timeout."""
+        server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
         server.starttls()
         if self.smtp_user and self.smtp_password:
             server.login(self.smtp_user, self.smtp_password)
@@ -61,6 +64,11 @@ class EmailService:
                 print(f"{'='*60}\n")
                 return True  # Return True in dev mode so the flow continues
             
+            print(f"[EMAIL] Attempting to send email to {to_email}")
+            print(f"[EMAIL] SMTP Host: {self.smtp_host}:{self.smtp_port}")
+            print(f"[EMAIL] SMTP User: {self.smtp_user}")
+            print(f"[EMAIL] Timeout: {self.smtp_timeout}s")
+            
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
             msg['From'] = f"{self.from_name} <{self.from_email}>"
@@ -73,14 +81,27 @@ class EmailService:
             # Add HTML version
             msg.attach(MIMEText(html_content, 'html'))
             
-            # Send email
+            # Send email with timeout protection
+            print(f"[EMAIL] Connecting to SMTP server...")
             server = self._create_connection()
+            print(f"[EMAIL] Connected, sending email...")
             server.sendmail(self.from_email, to_email, msg.as_string())
             server.quit()
             
             print(f"[EMAIL] Successfully sent email to {to_email}")
             return True
             
+        except socket.timeout:
+            print(f"[EMAIL] SMTP connection timed out after {self.smtp_timeout}s")
+            return False
+        except smtplib.SMTPAuthenticationError as e:
+            print(f"[EMAIL] SMTP Authentication failed: {str(e)}")
+            print(f"[EMAIL] Make sure you're using a Gmail App Password, not your regular password")
+            print(f"[EMAIL] Get an App Password at: https://myaccount.google.com/apppasswords")
+            return False
+        except smtplib.SMTPException as e:
+            print(f"[EMAIL] SMTP error: {str(e)}")
+            return False
         except Exception as e:
             print(f"[EMAIL] Failed to send email to {to_email}: {str(e)}")
             return False
