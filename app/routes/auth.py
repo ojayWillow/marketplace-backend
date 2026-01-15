@@ -2,12 +2,13 @@
 
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models import User, Review, PasswordResetToken
+from app.models import User, Review, PasswordResetToken, Listing, Offering, Task, TaskApplication
 from app.services.email import email_service
 import os
 from datetime import datetime, timedelta
 import jwt
 from functools import wraps
+from sqlalchemy.orm import joinedload
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -229,6 +230,118 @@ def get_profile(current_user_id):
         
         return jsonify(user_data), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@auth_bp.route('/profile/full', methods=['GET'])
+@token_required
+def get_profile_full(current_user_id):
+    """Get complete profile data including all related entities in a single call.
+    
+    Returns profile, reviews, listings, offerings, created tasks, and applications.
+    This is optimized for the profile page to load everything at once.
+    """
+    try:
+        # Get user
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get reviews received with reviewer info (eager load)
+        reviews_received = Review.query.filter_by(reviewed_user_id=current_user_id)\
+            .order_by(Review.created_at.desc()).all()
+        
+        # Calculate average rating
+        avg_rating = 0
+        if reviews_received:
+            avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
+        
+        # Build profile data
+        profile_data = user.to_dict()
+        profile_data['reviews_count'] = len(reviews_received)
+        profile_data['average_rating'] = round(avg_rating, 1)
+        
+        # Get reviews with reviewer details
+        reviews_data = []
+        for review in reviews_received:
+            reviewer = User.query.get(review.reviewer_id)
+            review_dict = review.to_dict()
+            review_dict['reviewer_name'] = reviewer.username if reviewer else 'Unknown'
+            review_dict['reviewer_avatar'] = reviewer.avatar_url if reviewer else None
+            reviews_data.append(review_dict)
+        
+        # Get user's listings
+        listings = Listing.query.filter_by(user_id=current_user_id)\
+            .order_by(Listing.created_at.desc()).all()
+        listings_data = [listing.to_dict() for listing in listings]
+        
+        # Get user's offerings
+        offerings = Offering.query.filter_by(creator_id=current_user_id)\
+            .order_by(Offering.created_at.desc()).all()
+        offerings_data = [offering.to_dict() for offering in offerings]
+        
+        # Get tasks created by user (with applications count)
+        created_tasks = Task.query.filter_by(creator_id=current_user_id)\
+            .order_by(Task.created_at.desc()).all()
+        
+        created_tasks_data = []
+        for task in created_tasks:
+            task_dict = task.to_dict()
+            # Count pending applications for this task
+            pending_count = TaskApplication.query.filter_by(
+                task_id=task.id, 
+                status='pending'
+            ).count()
+            task_dict['pending_applications_count'] = pending_count
+            
+            # Get assigned worker info if exists
+            if task.assigned_user_id:
+                assigned_user = User.query.get(task.assigned_user_id)
+                if assigned_user:
+                    task_dict['assigned_user'] = {
+                        'id': assigned_user.id,
+                        'username': assigned_user.username,
+                        'avatar_url': assigned_user.avatar_url or assigned_user.profile_picture_url
+                    }
+            
+            created_tasks_data.append(task_dict)
+        
+        # Get user's applications (jobs they applied to)
+        applications = TaskApplication.query.filter_by(applicant_id=current_user_id)\
+            .options(joinedload(TaskApplication.task))\
+            .order_by(TaskApplication.created_at.desc()).all()
+        
+        applications_data = []
+        for app in applications:
+            app_dict = app.to_dict()
+            if app.task:
+                task_dict = app.task.to_dict()
+                # Get task creator info
+                if app.task.creator_id:
+                    creator = User.query.get(app.task.creator_id)
+                    if creator:
+                        task_dict['creator'] = {
+                            'id': creator.id,
+                            'username': creator.username,
+                            'avatar_url': creator.avatar_url or creator.profile_picture_url
+                        }
+                app_dict['task'] = task_dict
+            applications_data.append(app_dict)
+        
+        return jsonify({
+            'profile': profile_data,
+            'reviews': reviews_data,
+            'listings': listings_data,
+            'offerings': offerings_data,
+            'created_tasks': created_tasks_data,
+            'applications': applications_data
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        print(f"[AUTH] Profile full error: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
