@@ -100,6 +100,51 @@ def get_unread_count(current_user_id):
         return jsonify({'error': str(e)}), 500
 
 
+@notifications_bp.route('/mark-read', methods=['POST'])
+@token_required
+def mark_notifications_by_type(current_user_id):
+    """Mark notifications as read by type.
+    
+    Body params:
+        - type: 'accepted_applications' | 'all'
+    """
+    try:
+        data = request.get_json() or {}
+        notification_type = data.get('type', 'all')
+        
+        now = datetime.utcnow()
+        query = Notification.query.filter_by(
+            user_id=current_user_id,
+            is_read=False
+        )
+        
+        # Filter by notification type if specified
+        if notification_type == 'accepted_applications':
+            query = query.filter_by(type=NotificationType.APPLICATION_ACCEPTED)
+        elif notification_type == 'new_applications':
+            query = query.filter_by(type=NotificationType.NEW_APPLICATION)
+        elif notification_type == 'task_marked_done':
+            query = query.filter_by(type=NotificationType.TASK_MARKED_DONE)
+        elif notification_type == 'task_completed':
+            query = query.filter_by(type=NotificationType.TASK_COMPLETED)
+        # 'all' type marks all unread notifications
+        
+        updated_count = query.update({
+            'is_read': True,
+            'read_at': now
+        })
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'Marked {updated_count} notification(s) as read',
+            'updated_count': updated_count
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
 @notifications_bp.route('/<int:notification_id>/read', methods=['POST'])
 @token_required
 def mark_as_read(current_user_id, notification_id):
