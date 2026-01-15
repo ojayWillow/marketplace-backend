@@ -271,8 +271,8 @@ def get_profile_full(current_user_id):
             review_dict['reviewer_avatar'] = reviewer.avatar_url if reviewer else None
             reviews_data.append(review_dict)
         
-        # Get user's listings
-        listings = Listing.query.filter_by(user_id=current_user_id)\
+        # Get user's listings (use seller_id, not user_id)
+        listings = Listing.query.filter_by(seller_id=current_user_id)\
             .order_by(Listing.created_at.desc()).all()
         listings_data = [listing.to_dict() for listing in listings]
         
