@@ -4,6 +4,13 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import joinedload
 from app import db
 from app.models import TaskRequest, User, TaskApplication
+from app.services.push_notifications import (
+    notify_application_received,
+    notify_application_accepted,
+    notify_application_rejected,
+    notify_task_marked_done,
+    notify_task_confirmed
+)
 from datetime import datetime
 from math import radians, sin, cos, sqrt, atan2
 from functools import wraps
@@ -93,6 +100,17 @@ def safe_create_notification(notify_func, *args, **kwargs):
         # Rollback to clean the session state after failed notification
         db.session.rollback()
         print(f"Notification skipped (non-critical): {e}")
+
+
+def send_push_safe(push_func, *args, **kwargs):
+    """
+    Safely send a push notification, handling errors gracefully.
+    Push failures should not affect the main operation.
+    """
+    try:
+        push_func(*args, **kwargs)
+    except Exception as e:
+        print(f"Push notification error (non-critical): {e}")
 
 
 def get_pending_applications_count(task_id: int) -> int:
@@ -532,16 +550,25 @@ def apply_to_task(current_user_id, task_id):
         creator_id = task.creator_id
         task_title = task.title
         
-        # Try to create notification for task creator (non-blocking)
+        # Send push notification to task creator
+        applicant = User.query.get(current_user_id)
+        applicant_name = applicant.name if applicant else 'Someone'
+        send_push_safe(
+            notify_application_received,
+            task_owner_id=creator_id,
+            applicant_name=applicant_name,
+            task_title=task_title,
+            task_id=task_id
+        )
+        
+        # Try to create in-app notification for task creator (non-blocking)
         try:
             from app.routes.notifications import notify_new_application
-            applicant = User.query.get(current_user_id)
-            applicant_name = applicant.name if applicant else 'Someone'
             notify_new_application(creator_id, applicant_name, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"Notification skipped (non-critical): {notify_error}")
+            print(f"In-app notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application submitted successfully',
@@ -628,24 +655,40 @@ def accept_application(current_user_id, task_id, application_id):
         accepted_applicant_id = application.applicant_id
         task_title = task.title
         
-        # Try to create notifications (non-blocking, after main commit)
+        # Send push notification to accepted applicant
+        send_push_safe(
+            notify_application_accepted,
+            applicant_id=accepted_applicant_id,
+            task_title=task_title,
+            task_id=task_id
+        )
+        
+        # Send push notifications to rejected applicants
+        for rejected_id in rejected_applicant_ids:
+            send_push_safe(
+                notify_application_rejected,
+                applicant_id=rejected_id,
+                task_title=task_title
+            )
+        
+        # Try to create in-app notifications (non-blocking)
         try:
-            from app.routes.notifications import notify_application_accepted, notify_application_rejected
-            notify_application_accepted(accepted_applicant_id, task_title, task_id)
+            from app.routes.notifications import notify_application_accepted as inapp_notify_accepted
+            inapp_notify_accepted(accepted_applicant_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"Accepted notification skipped (non-critical): {notify_error}")
+            print(f"In-app accepted notification skipped (non-critical): {notify_error}")
         
         # Notify rejected applicants separately
         for rejected_id in rejected_applicant_ids:
             try:
-                from app.routes.notifications import notify_application_rejected
-                notify_application_rejected(rejected_id, task_title, task_id)
+                from app.routes.notifications import notify_application_rejected as inapp_notify_rejected
+                inapp_notify_rejected(rejected_id, task_title, task_id)
                 db.session.commit()
             except Exception as notify_error:
                 db.session.rollback()
-                print(f"Rejected notification skipped (non-critical): {notify_error}")
+                print(f"In-app rejected notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application accepted and task assigned',
@@ -685,14 +728,21 @@ def reject_application(current_user_id, task_id, application_id):
         task_title = task.title
         application_dict = application.to_dict()
         
-        # Try to notify the rejected applicant (non-blocking)
+        # Send push notification to rejected applicant
+        send_push_safe(
+            notify_application_rejected,
+            applicant_id=applicant_id,
+            task_title=task_title
+        )
+        
+        # Try to create in-app notification (non-blocking)
         try:
-            from app.routes.notifications import notify_application_rejected
-            notify_application_rejected(applicant_id, task_title, task_id)
+            from app.routes.notifications import notify_application_rejected as inapp_notify_rejected
+            inapp_notify_rejected(applicant_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"Notification skipped (non-critical): {notify_error}")
+            print(f"In-app notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application rejected',
@@ -792,16 +842,25 @@ def mark_task_done(current_user_id, task_id):
         creator_id = task.creator_id
         task_title = task.title
         
-        # Try to notify task creator (non-blocking)
+        # Send push notification to task creator
+        worker = User.query.get(current_user_id)
+        worker_name = worker.name if worker else 'Worker'
+        send_push_safe(
+            notify_task_marked_done,
+            task_owner_id=creator_id,
+            worker_name=worker_name,
+            task_title=task_title,
+            task_id=task_id
+        )
+        
+        # Try to create in-app notification (non-blocking)
         try:
-            from app.routes.notifications import notify_task_marked_done
-            worker = User.query.get(current_user_id)
-            worker_name = worker.name if worker else 'Worker'
-            notify_task_marked_done(creator_id, worker_name, task_title, task_id)
+            from app.routes.notifications import notify_task_marked_done as inapp_notify_done
+            inapp_notify_done(creator_id, worker_name, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"Notification skipped (non-critical): {notify_error}")
+            print(f"In-app notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task marked as done. Waiting for creator confirmation.',
@@ -838,14 +897,22 @@ def confirm_task_completion(current_user_id, task_id):
         worker_id = task.assigned_to_id
         task_title = task.title
         
-        # Try to notify the worker (non-blocking)
+        # Send push notification to worker
+        send_push_safe(
+            notify_task_confirmed,
+            worker_id=worker_id,
+            task_title=task_title,
+            task_id=task_id
+        )
+        
+        # Try to create in-app notification (non-blocking)
         try:
-            from app.routes.notifications import notify_task_completed
-            notify_task_completed(worker_id, task_title, task_id)
+            from app.routes.notifications import notify_task_completed as inapp_notify_completed
+            inapp_notify_completed(worker_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"Notification skipped (non-critical): {notify_error}")
+            print(f"In-app notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task completed! Both parties can now leave reviews.',
