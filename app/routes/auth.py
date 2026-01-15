@@ -295,9 +295,9 @@ def get_profile_full(current_user_id):
             ).count()
             task_dict['pending_applications_count'] = pending_count
             
-            # Get assigned worker info if exists
-            if task.assigned_user_id:
-                assigned_user = User.query.get(task.assigned_user_id)
+            # Get assigned worker info if exists (use assigned_to_id)
+            if task.assigned_to_id:
+                assigned_user = User.query.get(task.assigned_to_id)
                 if assigned_user:
                     task_dict['assigned_user'] = {
                         'id': assigned_user.id,
