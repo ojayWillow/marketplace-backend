@@ -2,7 +2,7 @@
 
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models import User, Review, PasswordResetToken, Listing, Offering, Task, TaskApplication
+from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
 import os
 from datetime import datetime, timedelta
@@ -282,8 +282,8 @@ def get_profile_full(current_user_id):
         offerings_data = [offering.to_dict() for offering in offerings]
         
         # Get tasks created by user (with applications count)
-        created_tasks = Task.query.filter_by(creator_id=current_user_id)\
-            .order_by(Task.created_at.desc()).all()
+        created_tasks = TaskRequest.query.filter_by(creator_id=current_user_id)\
+            .order_by(TaskRequest.created_at.desc()).all()
         
         created_tasks_data = []
         for task in created_tasks:
