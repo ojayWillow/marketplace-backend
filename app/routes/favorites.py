@@ -3,37 +3,9 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Favorite, TaskRequest, Offering, Listing, User
-from datetime import datetime
-from functools import wraps
-import jwt
-import os
+from app.utils import token_required
 
 favorites_bp = Blueprint('favorites', __name__)
-
-# Use same secret key as auth.py
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
-
-
-def token_required(f):
-    """Decorator to require valid JWT token."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        
-        if not auth_header:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            request.current_user_id = payload['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        return f(*args, **kwargs)
-    return decorated
 
 
 def get_item_details(item_type, item_id):
@@ -102,9 +74,8 @@ def get_item_details(item_type, item_id):
 
 @favorites_bp.route('/api/favorites', methods=['POST'])
 @token_required
-def toggle_favorite():
+def toggle_favorite(current_user_id):
     """Toggle favorite status for an item (add if not favorited, remove if already favorited)."""
-    user_id = request.current_user_id
     data = request.get_json()
     
     item_type = data.get('item_type')
@@ -122,7 +93,7 @@ def toggle_favorite():
         return jsonify({'error': f'{item_type.capitalize()} not found'}), 404
     
     # Toggle favorite
-    is_favorited, favorite = Favorite.toggle_favorite(user_id, item_type, item_id)
+    is_favorited, favorite = Favorite.toggle_favorite(current_user_id, item_type, item_id)
     
     return jsonify({
         'is_favorited': is_favorited,
@@ -133,12 +104,11 @@ def toggle_favorite():
 
 @favorites_bp.route('/api/favorites', methods=['GET'])
 @token_required
-def get_favorites():
+def get_favorites(current_user_id):
     """Get all favorites for the current user with full item details."""
-    user_id = request.current_user_id
     item_type = request.args.get('type')  # Optional filter
     
-    favorites = Favorite.get_user_favorites(user_id, item_type)
+    favorites = Favorite.get_user_favorites(current_user_id, item_type)
     
     result = []
     for fav in favorites:
@@ -158,13 +128,12 @@ def get_favorites():
 
 @favorites_bp.route('/api/favorites/check', methods=['GET'])
 @token_required
-def check_favorites():
+def check_favorites(current_user_id):
     """Check if multiple items are favorited by the current user.
     
     Query params:
     - items: comma-separated list of "type:id" pairs, e.g., "task:1,offering:2,listing:3"
     """
-    user_id = request.current_user_id
     items_param = request.args.get('items', '')
     
     if not items_param:
@@ -176,7 +145,7 @@ def check_favorites():
             item_type, item_id = item_str.strip().split(':')
             item_id = int(item_id)
             key = f"{item_type}:{item_id}"
-            result[key] = Favorite.is_favorited(user_id, item_type, item_id)
+            result[key] = Favorite.is_favorited(current_user_id, item_type, item_id)
         except (ValueError, AttributeError):
             continue
     
@@ -185,11 +154,9 @@ def check_favorites():
 
 @favorites_bp.route('/api/favorites/<int:favorite_id>', methods=['DELETE'])
 @token_required
-def remove_favorite(favorite_id):
+def remove_favorite(current_user_id, favorite_id):
     """Remove a specific favorite by its ID."""
-    user_id = request.current_user_id
-    
-    favorite = Favorite.query.filter_by(id=favorite_id, user_id=user_id).first()
+    favorite = Favorite.query.filter_by(id=favorite_id, user_id=current_user_id).first()
     
     if not favorite:
         return jsonify({'error': 'Favorite not found'}), 404
@@ -202,15 +169,13 @@ def remove_favorite(favorite_id):
 
 @favorites_bp.route('/api/favorites/item/<item_type>/<int:item_id>', methods=['DELETE'])
 @token_required
-def remove_favorite_by_item(item_type, item_id):
+def remove_favorite_by_item(current_user_id, item_type, item_id):
     """Remove a favorite by item type and ID."""
-    user_id = request.current_user_id
-    
     if item_type not in ['task', 'offering', 'listing']:
         return jsonify({'error': 'Invalid item_type'}), 400
     
     favorite = Favorite.query.filter_by(
-        user_id=user_id,
+        user_id=current_user_id,
         item_type=item_type,
         item_id=item_id
     ).first()
@@ -226,14 +191,12 @@ def remove_favorite_by_item(item_type, item_id):
 
 @favorites_bp.route('/api/favorites/count', methods=['GET'])
 @token_required
-def get_favorites_count():
+def get_favorites_count(current_user_id):
     """Get count of user's favorites by type."""
-    user_id = request.current_user_id
-    
-    total = Favorite.query.filter_by(user_id=user_id).count()
-    tasks = Favorite.query.filter_by(user_id=user_id, item_type='task').count()
-    offerings = Favorite.query.filter_by(user_id=user_id, item_type='offering').count()
-    listings = Favorite.query.filter_by(user_id=user_id, item_type='listing').count()
+    total = Favorite.query.filter_by(user_id=current_user_id).count()
+    tasks = Favorite.query.filter_by(user_id=current_user_id, item_type='task').count()
+    offerings = Favorite.query.filter_by(user_id=current_user_id, item_type='offering').count()
+    listings = Favorite.query.filter_by(user_id=current_user_id, item_type='listing').count()
     
     return jsonify({
         'total': total,
