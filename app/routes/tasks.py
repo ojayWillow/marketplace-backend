@@ -46,6 +46,15 @@ def token_required(f):
     return decorated
 
 
+def get_display_name(user):
+    """Get the best display name for a user."""
+    if not user:
+        return 'Someone'
+    if user.first_name:
+        return user.first_name
+    return user.username or 'Someone'
+
+
 def get_bounding_box(lat, lng, radius_km):
     """
     Calculate a bounding box for SQL filtering.
@@ -552,7 +561,7 @@ def apply_to_task(current_user_id, task_id):
         
         # Send push notification to task creator
         applicant = User.query.get(current_user_id)
-        applicant_name = applicant.name if applicant else 'Someone'
+        applicant_name = get_display_name(applicant)
         send_push_safe(
             notify_application_received,
             task_owner_id=creator_id,
@@ -844,7 +853,7 @@ def mark_task_done(current_user_id, task_id):
         
         # Send push notification to task creator
         worker = User.query.get(current_user_id)
-        worker_name = worker.name if worker else 'Worker'
+        worker_name = get_display_name(worker)
         send_push_safe(
             notify_task_marked_done,
             task_owner_id=creator_id,
