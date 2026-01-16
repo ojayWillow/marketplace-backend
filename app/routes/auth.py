@@ -1,6 +1,6 @@
 """Authentication routes for user registration and login."""
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
@@ -103,39 +103,34 @@ def forgot_password():
     Accepts email and sends reset link if user exists.
     """
     try:
-        print("[AUTH] forgot-password endpoint called")
         data = request.get_json()
-        print(f"[AUTH] Request data: {data}")
         
         if not data or 'email' not in data:
             return jsonify({'error': 'Email is required'}), 400
         
         email = data['email'].lower().strip()
-        print(f"[AUTH] Looking up user with email: {email}")
+        current_app.logger.debug(f"Password reset requested for email: {email}")
         
         user = User.query.filter_by(email=email).first()
-        print(f"[AUTH] User found: {user is not None}")
         
         # Always return success to prevent email enumeration
         # But only send email if user exists
         if user:
             try:
-                print(f"[AUTH] Generating reset token for user_id: {user.id}")
                 # Generate reset token
                 reset_token = PasswordResetToken.generate_token(user.id)
-                print(f"[AUTH] Reset token generated successfully")
+                current_app.logger.debug(f"Reset token generated for user_id: {user.id}")
                 
                 # Send reset email
-                print(f"[AUTH] Sending password reset email...")
                 email_service.send_password_reset_email(
                     to_email=user.email,
                     username=user.username,
                     reset_token=reset_token
                 )
-                print(f"[AUTH] Email send completed")
+                current_app.logger.debug(f"Password reset email sent to user_id: {user.id}")
             except Exception as inner_e:
-                print(f"[AUTH] Error in token/email process: {str(inner_e)}")
-                print(traceback.format_exc())
+                current_app.logger.error(f"Error in password reset process: {str(inner_e)}")
+                current_app.logger.debug(traceback.format_exc())
                 # Don't raise - still return success to prevent email enumeration
         
         # Return success regardless of whether user exists
@@ -144,8 +139,7 @@ def forgot_password():
         }), 200
         
     except Exception as e:
-        print(f"[AUTH] Forgot password error: {str(e)}")
-        print(traceback.format_exc())
+        current_app.logger.error(f"Forgot password error: {str(e)}")
         return jsonify({'error': 'Failed to process request'}), 500
 
 
@@ -198,7 +192,7 @@ def reset_password():
         
     except Exception as e:
         db.session.rollback()
-        print(f"[AUTH] Reset password error: {str(e)}")
+        current_app.logger.error(f"Reset password error: {str(e)}")
         return jsonify({'error': 'Failed to reset password'}), 500
 
 
@@ -366,8 +360,8 @@ def get_profile_full(current_user_id):
         }), 200
         
     except Exception as e:
-        print(f"[AUTH] Profile full error: {str(e)}")
-        print(traceback.format_exc())
+        current_app.logger.error(f"Profile full error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
