@@ -29,11 +29,6 @@ def token_required(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Skip authentication in testing mode
-        if current_app.config.get('TESTING'):
-            current_user_id = 1  # Default test user
-            return f(current_user_id, *args, **kwargs)
-        
         auth_header = request.headers.get('Authorization')
         
         if not auth_header:
