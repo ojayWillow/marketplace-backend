@@ -7,6 +7,7 @@ Users can only review each other after:
 """
 
 from flask import Blueprint, request, jsonify
+from sqlalchemy.orm import joinedload
 from app import db
 from app.models import Review, User, Listing, TaskRequest
 from app.utils import token_required, token_optional
@@ -18,10 +19,36 @@ reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
 MIN_REVIEW_CONTENT_LENGTH = 10
 
 
+def build_review_response(review):
+    """Build review dict with reviewer and reviewed user info.
+    
+    Assumes reviewer and reviewed relationships are already loaded (via joinedload).
+    """
+    review_dict = review.to_dict()
+    if review.reviewer:
+        review_dict['reviewer'] = {
+            'id': review.reviewer.id,
+            'username': review.reviewer.username,
+            'profile_picture_url': review.reviewer.profile_picture_url
+        }
+    if review.reviewed:
+        review_dict['reviewed_user'] = {
+            'id': review.reviewed.id,
+            'username': review.reviewed.username,
+            'profile_picture_url': review.reviewed.profile_picture_url
+        }
+    return review_dict
+
+
 @reviews_bp.route('', methods=['GET'])
 def get_reviews():
-    """Get all reviews with optional filtering."""
+    """Get all reviews with optional filtering and pagination."""
     try:
+        # Pagination
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        per_page = min(per_page, 100)  # Cap at 100
+        
         # Optional filters
         reviewer_id = request.args.get('reviewer_id')
         reviewed_user_id = request.args.get('reviewed_user_id')
@@ -29,7 +56,11 @@ def get_reviews():
         task_id = request.args.get('task_id')
         rating_min = request.args.get('rating_min', type=int)
         
-        query = Review.query
+        # Build query with eager loading to avoid N+1
+        query = Review.query.options(
+            joinedload(Review.reviewer),
+            joinedload(Review.reviewed)
+        )
         
         if reviewer_id:
             query = query.filter_by(reviewer_id=reviewer_id)
@@ -42,27 +73,20 @@ def get_reviews():
         if rating_min:
             query = query.filter(Review.rating >= rating_min)
         
-        reviews = query.order_by(Review.created_at.desc()).all()
+        # Paginate
+        paginated = query.order_by(Review.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
         
-        # Include reviewer info
-        result = []
-        for review in reviews:
-            review_dict = review.to_dict()
-            if review.reviewer:
-                review_dict['reviewer'] = {
-                    'id': review.reviewer.id,
-                    'username': review.reviewer.username,
-                    'profile_picture_url': review.reviewer.profile_picture_url
-                }
-            if review.reviewed:
-                review_dict['reviewed_user'] = {
-                    'id': review.reviewed.id,
-                    'username': review.reviewed.username,
-                    'profile_picture_url': review.reviewed.profile_picture_url
-                }
-            result.append(review_dict)
+        result = [build_review_response(review) for review in paginated.items]
         
-        return jsonify(result), 200
+        return jsonify({
+            'reviews': result,
+            'total': paginated.total,
+            'page': page,
+            'per_page': per_page,
+            'has_more': paginated.has_next
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -75,24 +99,13 @@ def get_task_reviews(task_id):
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
-        reviews = Review.query.filter_by(task_id=task_id).order_by(Review.created_at.desc()).all()
+        # Eager load reviewer and reviewed to avoid N+1 queries
+        reviews = Review.query.options(
+            joinedload(Review.reviewer),
+            joinedload(Review.reviewed)
+        ).filter_by(task_id=task_id).order_by(Review.created_at.desc()).all()
         
-        result = []
-        for review in reviews:
-            review_dict = review.to_dict()
-            if review.reviewer:
-                review_dict['reviewer'] = {
-                    'id': review.reviewer.id,
-                    'username': review.reviewer.username,
-                    'profile_picture_url': review.reviewer.profile_picture_url
-                }
-            if review.reviewed:
-                review_dict['reviewed_user'] = {
-                    'id': review.reviewed.id,
-                    'username': review.reviewed.username,
-                    'profile_picture_url': review.reviewed.profile_picture_url
-                }
-            result.append(review_dict)
+        result = [build_review_response(review) for review in reviews]
         
         return jsonify({
             'reviews': result,
@@ -234,7 +247,11 @@ def create_task_review(current_user_id, task_id):
         db.session.add(review)
         db.session.commit()
         
-        # Get reviewer info for response
+        # Reload with relationships for response
+        review = Review.query.options(
+            joinedload(Review.reviewer)
+        ).get(review.id)
+        
         review_dict = review.to_dict()
         if review.reviewer:
             review_dict['reviewer'] = {
@@ -397,7 +414,11 @@ def can_review_user(current_user_id, user_id):
 def get_review(review_id):
     """Get a specific review by ID."""
     try:
-        review = Review.query.get(review_id)
+        # Eager load reviewer to avoid extra query
+        review = Review.query.options(
+            joinedload(Review.reviewer)
+        ).get(review_id)
+        
         if not review:
             return jsonify({'error': 'Review not found'}), 404
         
