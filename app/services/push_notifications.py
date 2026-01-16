@@ -2,9 +2,14 @@
 
 import os
 import json
+import logging
 from pywebpush import webpush, WebPushException
 from app import db
 from app.models import PushSubscription, User
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # VAPID keys - these should be set in environment variables
 VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
@@ -12,6 +17,11 @@ VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
 VAPID_CLAIMS = {
     'sub': os.getenv('VAPID_SUBJECT', 'mailto:support@tirgus.lv')
 }
+
+# Log VAPID configuration status on module load
+logger.info(f'[PUSH] VAPID_PUBLIC_KEY configured: {bool(VAPID_PUBLIC_KEY)} (length: {len(VAPID_PUBLIC_KEY)})')
+logger.info(f'[PUSH] VAPID_PRIVATE_KEY configured: {bool(VAPID_PRIVATE_KEY)} (length: {len(VAPID_PRIVATE_KEY)})')
+logger.info(f'[PUSH] VAPID_CLAIMS: {VAPID_CLAIMS}')
 
 
 def send_push_notification(user_id: int, title: str, body: str, 
@@ -31,8 +41,13 @@ def send_push_notification(user_id: int, title: str, body: str,
     Returns:
         dict with 'sent' count and 'failed' count
     """
+    logger.info(f'[PUSH] === Starting push notification ===')
+    logger.info(f'[PUSH] Recipient user_id: {user_id}')
+    logger.info(f'[PUSH] Title: {title}')
+    logger.info(f'[PUSH] Body: {body[:50]}...' if len(body) > 50 else f'[PUSH] Body: {body}')
+    
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
-        print('VAPID keys not configured - skipping push notification')
+        logger.error('[PUSH] VAPID keys not configured - skipping push notification')
         return {'sent': 0, 'failed': 0, 'error': 'VAPID keys not configured'}
     
     # Get all active subscriptions for this user
@@ -41,7 +56,10 @@ def send_push_notification(user_id: int, title: str, body: str,
         is_active=True
     ).all()
     
+    logger.info(f'[PUSH] Found {len(subscriptions)} active subscription(s) for user {user_id}')
+    
     if not subscriptions:
+        logger.warning(f'[PUSH] No active subscriptions for user {user_id}')
         return {'sent': 0, 'failed': 0, 'error': 'No active subscriptions'}
     
     # Build notification payload
@@ -56,10 +74,15 @@ def send_push_notification(user_id: int, title: str, body: str,
         }
     }
     
+    logger.info(f'[PUSH] Payload: {json.dumps(payload)}')
+    
     sent_count = 0
     failed_count = 0
     
     for subscription in subscriptions:
+        logger.info(f'[PUSH] Sending to subscription {subscription.id} (device: {subscription.device_name})')
+        logger.info(f'[PUSH] Endpoint: {subscription.endpoint[:80]}...')
+        
         try:
             subscription_info = {
                 'endpoint': subscription.endpoint,
@@ -69,26 +92,36 @@ def send_push_notification(user_id: int, title: str, body: str,
                 }
             }
             
-            webpush(
+            response = webpush(
                 subscription_info=subscription_info,
                 data=json.dumps(payload),
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=VAPID_CLAIMS
             )
+            
+            logger.info(f'[PUSH] SUCCESS - Notification sent to subscription {subscription.id}')
             sent_count += 1
             
         except WebPushException as e:
             failed_count += 1
+            logger.error(f'[PUSH] WebPushException for subscription {subscription.id}: {e}')
+            if e.response:
+                logger.error(f'[PUSH] Response status: {e.response.status_code}')
+                logger.error(f'[PUSH] Response body: {e.response.text[:500] if e.response.text else "empty"}')
+            
             # If subscription is invalid/expired, deactivate it
             if e.response and e.response.status_code in [404, 410]:
+                logger.warning(f'[PUSH] Deactivating invalid subscription {subscription.id}')
                 subscription.is_active = False
                 db.session.commit()
-            print(f'Push notification failed for subscription {subscription.id}: {e}')
+                
         except Exception as e:
             failed_count += 1
-            print(f'Unexpected error sending push: {e}')
+            logger.error(f'[PUSH] Unexpected error for subscription {subscription.id}: {type(e).__name__}: {e}')
     
-    return {'sent': sent_count, 'failed': failed_count}
+    result = {'sent': sent_count, 'failed': failed_count}
+    logger.info(f'[PUSH] === Completed: {result} ===')
+    return result
 
 
 # ============ NOTIFICATION HELPER FUNCTIONS ============
@@ -98,6 +131,7 @@ def notify_new_message(recipient_id: int, sender_name: str, message_preview: str
     """
     Send push notification for new message.
     """
+    logger.info(f'[PUSH] notify_new_message called - recipient: {recipient_id}, sender: {sender_name}')
     return send_push_notification(
         user_id=recipient_id,
         title=f'💬 {sender_name}',
@@ -112,6 +146,7 @@ def notify_application_received(task_owner_id: int, applicant_name: str,
     """
     Send push notification when someone applies to a task.
     """
+    logger.info(f'[PUSH] notify_application_received called - owner: {task_owner_id}')
     return send_push_notification(
         user_id=task_owner_id,
         title='👋 New Application!',
@@ -125,6 +160,7 @@ def notify_application_accepted(applicant_id: int, task_title: str, task_id: int
     """
     Send push notification when application is accepted.
     """
+    logger.info(f'[PUSH] notify_application_accepted called - applicant: {applicant_id}')
     return send_push_notification(
         user_id=applicant_id,
         title='🎉 Application Accepted!',
@@ -138,6 +174,7 @@ def notify_application_rejected(applicant_id: int, task_title: str):
     """
     Send push notification when application is rejected.
     """
+    logger.info(f'[PUSH] notify_application_rejected called - applicant: {applicant_id}')
     return send_push_notification(
         user_id=applicant_id,
         title='Application Update',
@@ -152,6 +189,7 @@ def notify_task_marked_done(task_owner_id: int, worker_name: str,
     """
     Send push notification when worker marks task as done.
     """
+    logger.info(f'[PUSH] notify_task_marked_done called - owner: {task_owner_id}')
     return send_push_notification(
         user_id=task_owner_id,
         title='✅ Task Completed',
@@ -165,6 +203,7 @@ def notify_task_confirmed(worker_id: int, task_title: str, task_id: int):
     """
     Send push notification when task owner confirms completion.
     """
+    logger.info(f'[PUSH] notify_task_confirmed called - worker: {worker_id}')
     return send_push_notification(
         user_id=worker_id,
         title='🌟 Great job!',
@@ -179,6 +218,7 @@ def notify_new_job_nearby(user_id: int, task_title: str, task_id: int,
     """
     Send push notification for new job posted nearby (optional feature).
     """
+    logger.info(f'[PUSH] notify_new_job_nearby called - user: {user_id}')
     return send_push_notification(
         user_id=user_id,
         title='💼 New Job Nearby!',
