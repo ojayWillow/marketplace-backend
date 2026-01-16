@@ -1,9 +1,6 @@
 """Routes for service offerings."""
 
 from flask import Blueprint, request, jsonify, g
-from functools import wraps
-import jwt
-import os
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 
@@ -11,61 +8,9 @@ from app import db
 from app.models.offering import Offering
 from app.models.user import User
 from app.models.message import Conversation, Message
+from app.utils import token_required_g, token_optional_g
 
 offerings_bp = Blueprint('offerings', __name__)
-
-
-def token_required(f):
-    """Decorator to require JWT authentication."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-        auth_header = request.headers.get('Authorization')
-        
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
-        if not token:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            secret_key = os.environ.get('JWT_SECRET_KEY', 'dev-secret-key')
-            data = jwt.decode(token, secret_key, algorithms=['HS256'])
-            current_user = User.query.get(data['user_id'])
-            if not current_user:
-                return jsonify({'error': 'User not found'}), 401
-            g.current_user = current_user
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        return f(*args, **kwargs)
-    return decorated
-
-
-def token_optional(f):
-    """Decorator for optional JWT authentication."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-        auth_header = request.headers.get('Authorization')
-        
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
-        g.current_user = None
-        if token:
-            try:
-                secret_key = os.environ.get('JWT_SECRET_KEY', 'dev-secret-key')
-                data = jwt.decode(token, secret_key, algorithms=['HS256'])
-                current_user = User.query.get(data['user_id'])
-                g.current_user = current_user
-            except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-                pass
-        
-        return f(*args, **kwargs)
-    return decorated
 
 
 def get_bounding_box(lat, lng, radius_km):
@@ -135,7 +80,7 @@ def translate_offering_if_needed(offering_dict: dict, lang: str | None) -> dict:
 
 
 @offerings_bp.route('', methods=['GET'])
-@token_optional
+@token_optional_g
 def get_offerings():
     """Get all offerings with optional filtering, geolocation, and translation."""
     try:
@@ -233,7 +178,7 @@ def get_offerings():
 
 
 @offerings_bp.route('/my', methods=['GET'])
-@token_required
+@token_required_g
 def get_my_offerings():
     """Get offerings created by current user."""
     try:
@@ -283,7 +228,7 @@ def get_user_offerings(user_id):
 
 
 @offerings_bp.route('/<int:offering_id>', methods=['GET'])
-@token_optional
+@token_optional_g
 def get_offering(offering_id):
     """Get a single offering by ID."""
     try:
@@ -302,7 +247,7 @@ def get_offering(offering_id):
 
 
 @offerings_bp.route('', methods=['POST'])
-@token_required
+@token_required_g
 def create_offering():
     """Create a new offering."""
     try:
@@ -346,7 +291,7 @@ def create_offering():
 
 
 @offerings_bp.route('/<int:offering_id>', methods=['PUT'])
-@token_required
+@token_required_g
 def update_offering(offering_id):
     """Update an existing offering."""
     try:
@@ -385,7 +330,7 @@ def update_offering(offering_id):
 
 
 @offerings_bp.route('/<int:offering_id>', methods=['DELETE'])
-@token_required
+@token_required_g
 def delete_offering(offering_id):
     """Delete an offering."""
     try:
@@ -409,7 +354,7 @@ def delete_offering(offering_id):
 
 
 @offerings_bp.route('/<int:offering_id>/pause', methods=['POST'])
-@token_required
+@token_required_g
 def pause_offering(offering_id):
     """Pause an offering (temporarily hide it)."""
     try:
@@ -436,7 +381,7 @@ def pause_offering(offering_id):
 
 
 @offerings_bp.route('/<int:offering_id>/activate', methods=['POST'])
-@token_required
+@token_required_g
 def activate_offering(offering_id):
     """Activate/resume an offering (without boost)."""
     try:
@@ -463,7 +408,7 @@ def activate_offering(offering_id):
 
 
 @offerings_bp.route('/<int:offering_id>/boost', methods=['POST'])
-@token_required
+@token_required_g
 def boost_offering(offering_id):
     """Boost an offering to show on the map (24-hour trial)."""
     try:
@@ -504,7 +449,7 @@ def boost_offering(offering_id):
 
 
 @offerings_bp.route('/<int:offering_id>/contact', methods=['POST'])
-@token_required
+@token_required_g
 def contact_offering_creator(offering_id):
     """Contact the offering creator (start a conversation)."""
     try:
