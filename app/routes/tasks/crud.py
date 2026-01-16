@@ -3,8 +3,9 @@
 from flask import request, jsonify
 from sqlalchemy.orm import joinedload
 from app import db
-from app.models import TaskRequest, User
+from app.models import TaskRequest, User, TaskApplication
 from app.utils import token_required
+from app.utils.auth import SECRET_KEY
 from app.routes.tasks import tasks_bp
 from app.routes.tasks.helpers import (
     get_bounding_box,
@@ -13,6 +14,20 @@ from app.routes.tasks.helpers import (
     get_pending_applications_count
 )
 from datetime import datetime
+import jwt
+
+
+def get_current_user_id_optional():
+    """Extract user_id from token if present, return None otherwise."""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+    try:
+        token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        return payload.get('user_id')
+    except:
+        return None
 
 
 @tasks_bp.route('', methods=['GET'])
@@ -108,7 +123,12 @@ def get_tasks():
 
 @tasks_bp.route('/<int:task_id>', methods=['GET'])
 def get_task(task_id):
-    """Get a specific task request by ID."""
+    """Get a specific task request by ID.
+    
+    If authenticated, also returns:
+        - has_applied: boolean indicating if user has applied
+        - user_application: the user's application object if exists
+    """
     try:
         lang = request.args.get('lang')
         
@@ -121,6 +141,20 @@ def get_task(task_id):
         
         task_dict = translate_task_if_needed(task.to_dict(), lang)
         task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
+        
+        # Check if current user has applied (if authenticated)
+        current_user_id = get_current_user_id_optional()
+        if current_user_id:
+            existing_application = TaskApplication.query.filter_by(
+                task_id=task_id,
+                applicant_id=current_user_id
+            ).first()
+            task_dict['has_applied'] = existing_application is not None
+            task_dict['user_application'] = existing_application.to_dict() if existing_application else None
+        else:
+            task_dict['has_applied'] = False
+            task_dict['user_application'] = None
+        
         return jsonify(task_dict), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
