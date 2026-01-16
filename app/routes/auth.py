@@ -28,6 +28,10 @@ def register():
         if not data or not all(k in data for k in ['username', 'email', 'password']):
             return jsonify({'error': 'Missing required fields'}), 400
         
+        # Validate password length (consistent with reset-password)
+        if len(data['password']) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
         if User.query.filter_by(username=data['username']).first():
             return jsonify({'error': 'Username already exists'}), 409
         
