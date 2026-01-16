@@ -11,48 +11,11 @@ from app.services.push_notifications import (
     notify_task_marked_done,
     notify_task_confirmed
 )
+from app.utils import token_required, get_display_name, send_push_safe
 from datetime import datetime
 from math import radians, sin, cos, sqrt, atan2
-from functools import wraps
-import jwt
-import os
 
 tasks_bp = Blueprint('tasks', __name__)
-
-# IMPORTANT: Use JWT_SECRET_KEY consistently with auth.py
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
-
-
-def token_required(f):
-    """Decorator to require valid JWT token - same method as auth.py"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        
-        if not auth_header:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            # Remove 'Bearer ' prefix
-            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            current_user_id = payload['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
-
-
-def get_display_name(user):
-    """Get the best display name for a user."""
-    if not user:
-        return 'Someone'
-    if user.first_name:
-        return user.first_name
-    return user.username or 'Someone'
 
 
 def get_bounding_box(lat, lng, radius_km):
@@ -95,31 +58,6 @@ def translate_task_if_needed(task_dict: dict, lang: str | None) -> dict:
         # If translation fails, return original
         print(f"Translation error: {e}")
         return task_dict
-
-
-def safe_create_notification(notify_func, *args, **kwargs):
-    """
-    Safely call a notification function, handling errors gracefully.
-    If notification fails (e.g., table doesn't exist), rollback and continue.
-    """
-    try:
-        notify_func(*args, **kwargs)
-        db.session.commit()
-    except Exception as e:
-        # Rollback to clean the session state after failed notification
-        db.session.rollback()
-        print(f"Notification skipped (non-critical): {e}")
-
-
-def send_push_safe(push_func, *args, **kwargs):
-    """
-    Safely send a push notification, handling errors gracefully.
-    Push failures should not affect the main operation.
-    """
-    try:
-        push_func(*args, **kwargs)
-    except Exception as e:
-        print(f"Push notification error (non-critical): {e}")
 
 
 def get_pending_applications_count(task_id: int) -> int:
