@@ -3,37 +3,10 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Notification, NotificationType
+from app.utils import token_required
 from datetime import datetime
-from functools import wraps
-import jwt
-import os
 
 notifications_bp = Blueprint('notifications', __name__)
-
-# IMPORTANT: Use JWT_SECRET_KEY consistently with auth.py
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
-
-
-def token_required(f):
-    """Decorator to require valid JWT token."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        
-        if not auth_header:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            current_user_id = payload['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
 
 
 @notifications_bp.route('', methods=['GET'])
