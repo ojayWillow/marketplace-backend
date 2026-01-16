@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import jwt
 import traceback
 from sqlalchemy.orm import joinedload
+from sqlalchemy import func
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -235,6 +236,11 @@ def get_profile_full(current_user_id):
     
     Returns profile, reviews, listings, offerings, created tasks, and applications.
     This is optimized for the profile page to load everything at once.
+    
+    Performance optimizations:
+    - Uses joinedload for eager loading relationships
+    - Batch-fetches related users in single queries
+    - Uses grouped query for application counts
     """
     try:
         # Get user
@@ -243,8 +249,10 @@ def get_profile_full(current_user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Get reviews received with reviewer info (eager load)
-        reviews_received = Review.query.filter_by(reviewed_user_id=current_user_id)\
+        # Get reviews received with reviewer info (eager load reviewer relationship)
+        reviews_received = Review.query\
+            .filter_by(reviewed_user_id=current_user_id)\
+            .options(joinedload(Review.reviewer))\
             .order_by(Review.created_at.desc()).all()
         
         # Calculate average rating
@@ -257,13 +265,16 @@ def get_profile_full(current_user_id):
         profile_data['reviews_count'] = len(reviews_received)
         profile_data['average_rating'] = round(avg_rating, 1)
         
-        # Get reviews with reviewer details
+        # Get reviews with reviewer details (no extra queries - already eager loaded)
         reviews_data = []
         for review in reviews_received:
-            reviewer = User.query.get(review.reviewer_id)
             review_dict = review.to_dict()
-            review_dict['reviewer_name'] = reviewer.username if reviewer else 'Unknown'
-            review_dict['reviewer_avatar'] = reviewer.avatar_url if reviewer else None
+            if review.reviewer:
+                review_dict['reviewer_name'] = review.reviewer.username
+                review_dict['reviewer_avatar'] = review.reviewer.avatar_url
+            else:
+                review_dict['reviewer_name'] = 'Unknown'
+                review_dict['reviewer_avatar'] = None
             reviews_data.append(review_dict)
         
         # Get user's listings (use seller_id, not user_id)
@@ -276,51 +287,72 @@ def get_profile_full(current_user_id):
             .order_by(Offering.created_at.desc()).all()
         offerings_data = [offering.to_dict() for offering in offerings]
         
-        # Get tasks created by user (with applications count)
+        # Get tasks created by user
         created_tasks = TaskRequest.query.filter_by(creator_id=current_user_id)\
             .order_by(TaskRequest.created_at.desc()).all()
+        
+        # Batch-fetch all assigned users in one query (instead of N queries)
+        assigned_user_ids = [t.assigned_to_id for t in created_tasks if t.assigned_to_id]
+        assigned_users_map = {}
+        if assigned_user_ids:
+            assigned_users = User.query.filter(User.id.in_(assigned_user_ids)).all()
+            assigned_users_map = {u.id: u for u in assigned_users}
+        
+        # Batch-fetch pending application counts in one grouped query
+        task_ids = [t.id for t in created_tasks]
+        pending_counts = {}
+        if task_ids:
+            counts = db.session.query(
+                TaskApplication.task_id,
+                func.count(TaskApplication.id)
+            ).filter(
+                TaskApplication.task_id.in_(task_ids),
+                TaskApplication.status == 'pending'
+            ).group_by(TaskApplication.task_id).all()
+            pending_counts = {task_id: count for task_id, count in counts}
         
         created_tasks_data = []
         for task in created_tasks:
             task_dict = task.to_dict()
-            # Count pending applications for this task
-            pending_count = TaskApplication.query.filter_by(
-                task_id=task.id, 
-                status='pending'
-            ).count()
-            task_dict['pending_applications_count'] = pending_count
+            # Get pending count from pre-fetched map (default 0)
+            task_dict['pending_applications_count'] = pending_counts.get(task.id, 0)
             
-            # Get assigned worker info if exists (use assigned_to_id)
-            if task.assigned_to_id:
-                assigned_user = User.query.get(task.assigned_to_id)
-                if assigned_user:
-                    task_dict['assigned_user'] = {
-                        'id': assigned_user.id,
-                        'username': assigned_user.username,
-                        'avatar_url': assigned_user.avatar_url or assigned_user.profile_picture_url
-                    }
+            # Get assigned worker info from pre-fetched map
+            if task.assigned_to_id and task.assigned_to_id in assigned_users_map:
+                assigned_user = assigned_users_map[task.assigned_to_id]
+                task_dict['assigned_user'] = {
+                    'id': assigned_user.id,
+                    'username': assigned_user.username,
+                    'avatar_url': assigned_user.avatar_url or assigned_user.profile_picture_url
+                }
             
             created_tasks_data.append(task_dict)
         
-        # Get user's applications (jobs they applied to)
+        # Get user's applications (jobs they applied to) with task eager-loaded
         applications = TaskApplication.query.filter_by(applicant_id=current_user_id)\
             .options(joinedload(TaskApplication.task))\
             .order_by(TaskApplication.created_at.desc()).all()
+        
+        # Batch-fetch task creators for all applications
+        creator_ids = [app.task.creator_id for app in applications if app.task and app.task.creator_id]
+        creators_map = {}
+        if creator_ids:
+            creators = User.query.filter(User.id.in_(creator_ids)).all()
+            creators_map = {u.id: u for u in creators}
         
         applications_data = []
         for app in applications:
             app_dict = app.to_dict()
             if app.task:
                 task_dict = app.task.to_dict()
-                # Get task creator info
-                if app.task.creator_id:
-                    creator = User.query.get(app.task.creator_id)
-                    if creator:
-                        task_dict['creator'] = {
-                            'id': creator.id,
-                            'username': creator.username,
-                            'avatar_url': creator.avatar_url or creator.profile_picture_url
-                        }
+                # Get task creator info from pre-fetched map
+                if app.task.creator_id and app.task.creator_id in creators_map:
+                    creator = creators_map[app.task.creator_id]
+                    task_dict['creator'] = {
+                        'id': creator.id,
+                        'username': creator.username,
+                        'avatar_url': creator.avatar_url or creator.profile_picture_url
+                    }
                 app_dict['task'] = task_dict
             applications_data.append(app_dict)
         
@@ -334,7 +366,6 @@ def get_profile_full(current_user_id):
         }), 200
         
     except Exception as e:
-        import traceback
         print(f"[AUTH] Profile full error: {str(e)}")
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
@@ -457,14 +488,21 @@ def get_user_reviews(user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        reviews = Review.query.filter_by(reviewed_user_id=user_id).order_by(Review.created_at.desc()).all()
+        # Eager load reviewer to avoid N+1 queries
+        reviews = Review.query\
+            .filter_by(reviewed_user_id=user_id)\
+            .options(joinedload(Review.reviewer))\
+            .order_by(Review.created_at.desc()).all()
         
         reviews_data = []
         for review in reviews:
-            reviewer = User.query.get(review.reviewer_id)
             review_dict = review.to_dict()
-            review_dict['reviewer_name'] = reviewer.username if reviewer else 'Unknown'
-            review_dict['reviewer_avatar'] = reviewer.avatar_url if reviewer else None
+            if review.reviewer:
+                review_dict['reviewer_name'] = review.reviewer.username
+                review_dict['reviewer_avatar'] = review.reviewer.avatar_url
+            else:
+                review_dict['reviewer_name'] = 'Unknown'
+                review_dict['reviewer_avatar'] = None
             reviews_data.append(review_dict)
         
         return jsonify({
