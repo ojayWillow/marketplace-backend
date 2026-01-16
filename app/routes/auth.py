@@ -4,15 +4,29 @@ from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
+from app.services.firebase import verify_firebase_token, normalize_phone_number
 from app.utils import token_required
 from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
 import jwt
 import traceback
+import secrets
+import string
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 
 auth_bp = Blueprint('auth', __name__)
+
+
+def generate_temp_username():
+    """Generate a temporary username for new phone users."""
+    random_suffix = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    return f"user_{random_suffix}"
+
+
+def generate_temp_password():
+    """Generate a secure random password for phone-authenticated users."""
+    return secrets.token_urlsafe(32)
 
 
 @auth_bp.route('/register', methods=['POST'])
@@ -96,12 +110,237 @@ def login():
         return jsonify({'error': str(e)}), 500
 
 
+# ============================================================================
+# PHONE AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@auth_bp.route('/phone/verify', methods=['POST'])
+def phone_verify():
+    """Verify Firebase phone authentication and create/login user.
+    
+    This endpoint receives a Firebase ID token after the user has completed
+    phone verification on the frontend. It:
+    1. Verifies the Firebase token
+    2. Extracts the verified phone number
+    3. Creates a new user or logs in existing user
+    4. Returns our app's JWT token
+    
+    Request body:
+        - idToken: Firebase ID token from frontend
+        - phoneNumber: Phone number (for verification, must match token)
+        
+    Returns:
+        - access_token: Our app's JWT for API calls
+        - user: User object
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'idToken' not in data:
+            return jsonify({'error': 'Firebase ID token is required'}), 400
+        
+        id_token = data['idToken']
+        provided_phone = data.get('phoneNumber')
+        
+        # Verify Firebase token
+        try:
+            firebase_data = verify_firebase_token(id_token)
+        except ValueError as e:
+            current_app.logger.warning(f"Firebase token verification failed: {e}")
+            return jsonify({'error': str(e)}), 401
+        
+        # Get verified phone number from Firebase
+        verified_phone = firebase_data.get('phone_number')
+        
+        if not verified_phone:
+            return jsonify({'error': 'Phone number not verified in token'}), 401
+        
+        # Normalize phone number
+        normalized_phone = normalize_phone_number(verified_phone)
+        
+        # Optional: Verify provided phone matches token (extra security)
+        if provided_phone:
+            normalized_provided = normalize_phone_number(provided_phone)
+            if normalized_provided != normalized_phone:
+                current_app.logger.warning(
+                    f"Phone mismatch: provided={normalized_provided}, token={normalized_phone}"
+                )
+                return jsonify({'error': 'Phone number mismatch'}), 401
+        
+        # Find or create user by phone number
+        user = User.query.filter_by(phone=normalized_phone).first()
+        
+        if user:
+            # Existing user - update phone verification status
+            if not user.is_active:
+                return jsonify({'error': 'Account is disabled'}), 403
+            
+            user.phone_verified = True
+            user.last_seen = datetime.utcnow()
+            db.session.commit()
+            
+            current_app.logger.info(f"Phone login: existing user {user.id}")
+        else:
+            # New user - create account with phone
+            temp_username = generate_temp_username()
+            temp_email = f"{temp_username}@phone.tirgus.local"  # Placeholder email
+            
+            user = User(
+                username=temp_username,
+                email=temp_email,
+                phone=normalized_phone,
+                phone_verified=True,
+                is_verified=True  # Phone-verified users are considered verified
+            )
+            # Set a random password (user won't use it for phone auth)
+            user.set_password(generate_temp_password())
+            
+            db.session.add(user)
+            db.session.commit()
+            
+            current_app.logger.info(f"Phone login: new user created {user.id}")
+        
+        # Generate our JWT token
+        payload = {
+            'user_id': user.id,
+            'username': user.username,
+            'exp': datetime.utcnow() + timedelta(hours=24)
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        
+        return jsonify({
+            'message': 'Phone verification successful',
+            'access_token': token,
+            'user': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Phone verify error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
+        return jsonify({'error': 'Phone verification failed'}), 500
+
+
+@auth_bp.route('/phone/check/<phone>', methods=['GET'])
+def phone_check(phone):
+    """Check if a phone number is already registered.
+    
+    Useful for frontend to determine whether to show "Login" or "Register" flow.
+    
+    Args:
+        phone: Phone number to check (URL parameter)
+        
+    Returns:
+        - exists: boolean indicating if phone is registered
+    """
+    try:
+        normalized_phone = normalize_phone_number(phone)
+        
+        if not normalized_phone:
+            return jsonify({'error': 'Invalid phone number'}), 400
+        
+        user = User.query.filter_by(phone=normalized_phone).first()
+        
+        return jsonify({
+            'exists': user is not None,
+            'phone': normalized_phone
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Phone check error: {str(e)}")
+        return jsonify({'error': 'Failed to check phone number'}), 500
+
+
+@auth_bp.route('/complete-registration', methods=['PUT'])
+@token_required
+def complete_registration(current_user_id):
+    """Complete registration for phone-authenticated users.
+    
+    New phone users get a temporary username. This endpoint lets them
+    set their actual username and optionally add an email.
+    
+    Request body:
+        - username: Desired username (required)
+        - email: Email address (optional)
+        
+    Returns:
+        - access_token: New JWT with updated username
+        - user: Updated user object
+    """
+    try:
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        data = request.get_json()
+        
+        if not data or 'username' not in data:
+            return jsonify({'error': 'Username is required'}), 400
+        
+        new_username = data['username'].lower().strip()
+        new_email = data.get('email', '').lower().strip() if data.get('email') else None
+        
+        # Validate username
+        if len(new_username) < 3:
+            return jsonify({'error': 'Username must be at least 3 characters'}), 400
+        
+        if len(new_username) > 30:
+            return jsonify({'error': 'Username must be less than 30 characters'}), 400
+        
+        if not new_username.replace('_', '').isalnum():
+            return jsonify({'error': 'Username can only contain letters, numbers, and underscores'}), 400
+        
+        # Check if username is taken (by another user)
+        existing_user = User.query.filter_by(username=new_username).first()
+        if existing_user and existing_user.id != user.id:
+            return jsonify({'error': 'Username already exists'}), 409
+        
+        # Check email if provided
+        if new_email:
+            # Basic email validation
+            if '@' not in new_email or '.' not in new_email:
+                return jsonify({'error': 'Invalid email format'}), 400
+            
+            existing_email = User.query.filter_by(email=new_email).first()
+            if existing_email and existing_email.id != user.id:
+                return jsonify({'error': 'Email already exists'}), 409
+            
+            user.email = new_email
+        
+        # Update username
+        user.username = new_username
+        user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Generate new token with updated username
+        payload = {
+            'user_id': user.id,
+            'username': user.username,
+            'exp': datetime.utcnow() + timedelta(hours=24)
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        
+        return jsonify({
+            'message': 'Registration completed successfully',
+            'access_token': token,
+            'user': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Complete registration error: {str(e)}")
+        return jsonify({'error': 'Failed to complete registration'}), 500
+
+
+# ============================================================================
+# EXISTING ENDPOINTS (unchanged)
+# ============================================================================
+
 @auth_bp.route('/forgot-password', methods=['POST'])
 def forgot_password():
-    """
-    Request a password reset email.
-    Accepts email and sends reset link if user exists.
-    """
+    """Request a password reset email."""
     try:
         data = request.get_json()
         
@@ -113,15 +352,11 @@ def forgot_password():
         
         user = User.query.filter_by(email=email).first()
         
-        # Always return success to prevent email enumeration
-        # But only send email if user exists
         if user:
             try:
-                # Generate reset token
                 reset_token = PasswordResetToken.generate_token(user.id)
                 current_app.logger.debug(f"Reset token generated for user_id: {user.id}")
                 
-                # Send reset email
                 email_service.send_password_reset_email(
                     to_email=user.email,
                     username=user.username,
@@ -131,9 +366,7 @@ def forgot_password():
             except Exception as inner_e:
                 current_app.logger.error(f"Error in password reset process: {str(inner_e)}")
                 current_app.logger.debug(traceback.format_exc())
-                # Don't raise - still return success to prevent email enumeration
         
-        # Return success regardless of whether user exists
         return jsonify({
             'message': 'If an account with that email exists, we have sent a password reset link.'
         }), 200
@@ -145,10 +378,7 @@ def forgot_password():
 
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
-    """
-    Reset password using token from email.
-    Accepts token and new password.
-    """
+    """Reset password using token from email."""
     try:
         data = request.get_json()
         
@@ -158,17 +388,14 @@ def reset_password():
         token = data['token']
         new_password = data['password']
         
-        # Validate password length
         if len(new_password) < 6:
             return jsonify({'error': 'Password must be at least 6 characters'}), 400
         
-        # Verify token and get user_id
         user_id = PasswordResetToken.verify_token(token)
         
         if not user_id:
             return jsonify({'error': 'Invalid or expired reset link'}), 400
         
-        # Get user and update password
         user = User.query.get(user_id)
         
         if not user:
@@ -177,11 +404,9 @@ def reset_password():
         if not user.is_active:
             return jsonify({'error': 'Account is disabled'}), 403
         
-        # Update password
         user.set_password(new_password)
         user.updated_at = datetime.utcnow()
         
-        # Mark token as used
         PasswordResetToken.use_token(token)
         
         db.session.commit()
@@ -206,10 +431,8 @@ def get_profile(current_user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Get user's reviews
         reviews_received = Review.query.filter_by(reviewed_user_id=current_user_id).all()
         
-        # Calculate average rating
         avg_rating = 0
         if reviews_received:
             avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
@@ -226,40 +449,26 @@ def get_profile(current_user_id):
 @auth_bp.route('/profile/full', methods=['GET'])
 @token_required
 def get_profile_full(current_user_id):
-    """Get complete profile data including all related entities in a single call.
-    
-    Returns profile, reviews, listings, offerings, created tasks, and applications.
-    This is optimized for the profile page to load everything at once.
-    
-    Performance optimizations:
-    - Uses joinedload for eager loading relationships
-    - Batch-fetches related users in single queries
-    - Uses grouped query for application counts
-    """
+    """Get complete profile data including all related entities."""
     try:
-        # Get user
         user = User.query.get(current_user_id)
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Get reviews received with reviewer info (eager load reviewer relationship)
         reviews_received = Review.query\
             .filter_by(reviewed_user_id=current_user_id)\
             .options(joinedload(Review.reviewer))\
             .order_by(Review.created_at.desc()).all()
         
-        # Calculate average rating
         avg_rating = 0
         if reviews_received:
             avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
         
-        # Build profile data
         profile_data = user.to_dict()
         profile_data['reviews_count'] = len(reviews_received)
         profile_data['average_rating'] = round(avg_rating, 1)
         
-        # Get reviews with reviewer details (no extra queries - already eager loaded)
         reviews_data = []
         for review in reviews_received:
             review_dict = review.to_dict()
@@ -271,28 +480,23 @@ def get_profile_full(current_user_id):
                 review_dict['reviewer_avatar'] = None
             reviews_data.append(review_dict)
         
-        # Get user's listings (use seller_id, not user_id)
         listings = Listing.query.filter_by(seller_id=current_user_id)\
             .order_by(Listing.created_at.desc()).all()
         listings_data = [listing.to_dict() for listing in listings]
         
-        # Get user's offerings
         offerings = Offering.query.filter_by(creator_id=current_user_id)\
             .order_by(Offering.created_at.desc()).all()
         offerings_data = [offering.to_dict() for offering in offerings]
         
-        # Get tasks created by user
         created_tasks = TaskRequest.query.filter_by(creator_id=current_user_id)\
             .order_by(TaskRequest.created_at.desc()).all()
         
-        # Batch-fetch all assigned users in one query (instead of N queries)
         assigned_user_ids = [t.assigned_to_id for t in created_tasks if t.assigned_to_id]
         assigned_users_map = {}
         if assigned_user_ids:
             assigned_users = User.query.filter(User.id.in_(assigned_user_ids)).all()
             assigned_users_map = {u.id: u for u in assigned_users}
         
-        # Batch-fetch pending application counts in one grouped query
         task_ids = [t.id for t in created_tasks]
         pending_counts = {}
         if task_ids:
@@ -308,10 +512,8 @@ def get_profile_full(current_user_id):
         created_tasks_data = []
         for task in created_tasks:
             task_dict = task.to_dict()
-            # Get pending count from pre-fetched map (default 0)
             task_dict['pending_applications_count'] = pending_counts.get(task.id, 0)
             
-            # Get assigned worker info from pre-fetched map
             if task.assigned_to_id and task.assigned_to_id in assigned_users_map:
                 assigned_user = assigned_users_map[task.assigned_to_id]
                 task_dict['assigned_user'] = {
@@ -322,12 +524,10 @@ def get_profile_full(current_user_id):
             
             created_tasks_data.append(task_dict)
         
-        # Get user's applications (jobs they applied to) with task eager-loaded
         applications = TaskApplication.query.filter_by(applicant_id=current_user_id)\
             .options(joinedload(TaskApplication.task))\
             .order_by(TaskApplication.created_at.desc()).all()
         
-        # Batch-fetch task creators for all applications
         creator_ids = [app.task.creator_id for app in applications if app.task and app.task.creator_id]
         creators_map = {}
         if creator_ids:
@@ -339,7 +539,6 @@ def get_profile_full(current_user_id):
             app_dict = app.to_dict()
             if app.task:
                 task_dict = app.task.to_dict()
-                # Get task creator info from pre-fetched map
                 if app.task.creator_id and app.task.creator_id in creators_map:
                     creator = creators_map[app.task.creator_id]
                     task_dict['creator'] = {
@@ -377,7 +576,6 @@ def update_profile(current_user_id):
         
         data = request.get_json()
         
-        # Basic profile fields
         if 'first_name' in data:
             user.first_name = data['first_name']
         if 'last_name' in data:
@@ -395,11 +593,9 @@ def update_profile(current_user_id):
         if 'profile_picture_url' in data:
             user.profile_picture_url = data['profile_picture_url']
         
-        # Helper-specific fields
         if 'is_helper' in data:
             user.is_helper = data['is_helper']
         if 'skills' in data:
-            # Accept either comma-separated string or array
             if isinstance(data['skills'], list):
                 user.skills = ','.join(data['skills'])
             else:
@@ -437,15 +633,12 @@ def get_user_public(user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Get user's reviews
         reviews_received = Review.query.filter_by(reviewed_user_id=user_id).all()
         
-        # Calculate average rating
         avg_rating = 0
         if reviews_received:
             avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
         
-        # Return only public info (no email, phone)
         public_data = {
             'id': user.id,
             'username': user.username,
@@ -482,7 +675,6 @@ def get_user_reviews(user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Eager load reviewer to avoid N+1 queries
         reviews = Review.query\
             .filter_by(reviewed_user_id=user_id)\
             .options(joinedload(Review.reviewer))\
