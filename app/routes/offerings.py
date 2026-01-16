@@ -1,6 +1,6 @@
 """Routes for service offerings."""
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 
@@ -75,7 +75,7 @@ def translate_offering_if_needed(offering_dict: dict, lang: str | None) -> dict:
         return translate_offering(offering_dict, lang)
     except Exception as e:
         # If translation fails, return original
-        print(f"Translation error: {e}")
+        current_app.logger.error(f"Translation error: {e}")
         return offering_dict
 
 
