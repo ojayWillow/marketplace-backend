@@ -5,7 +5,7 @@ from app import db
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
 from app.utils import token_required
-import os
+from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
 import jwt
 import traceback
@@ -13,10 +13,6 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 
 auth_bp = Blueprint('auth', __name__)
-
-# Use JWT_SECRET_KEY consistently across all routes
-# Note: This is still needed here for token GENERATION (login/register)
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 
 @auth_bp.route('/register', methods=['POST'])
