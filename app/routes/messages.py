@@ -37,6 +37,13 @@ def token_required(f):
     return decorated
 
 
+def get_display_name(user):
+    """Get the best display name for a user."""
+    if user.first_name:
+        return user.first_name
+    return user.username or 'Someone'
+
+
 @messages_bp.route('/conversations', methods=['GET'])
 @token_required
 def get_conversations(current_user_id):
@@ -110,7 +117,7 @@ def create_conversation(current_user_id):
                 # Send push notification for the message
                 try:
                     from app.services.push_notifications import notify_new_message
-                    sender_name = sender.name or sender.username or 'Someone'
+                    sender_name = get_display_name(sender)
                     notify_new_message(
                         recipient_id=other_user_id,
                         sender_name=sender_name,
@@ -150,7 +157,7 @@ def create_conversation(current_user_id):
         if initial_message:
             try:
                 from app.services.push_notifications import notify_new_message
-                sender_name = sender.name or sender.username or 'Someone'
+                sender_name = get_display_name(sender)
                 notify_new_message(
                     recipient_id=other_user_id,
                     sender_name=sender_name,
@@ -287,7 +294,7 @@ def send_message(current_user_id, conversation_id):
             
             # Get sender name
             sender = User.query.get(current_user_id)
-            sender_name = sender.name or sender.username or 'Someone'
+            sender_name = get_display_name(sender)
             
             notify_new_message(
                 recipient_id=recipient_id,
