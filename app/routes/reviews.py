@@ -6,65 +6,16 @@ Users can only review each other after:
 - Completing a listing sale (buyer reviews seller, seller reviews buyer)
 """
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Review, User, Listing, TaskRequest
-from functools import wraps
-import jwt
-import os
+from app.utils import token_required, token_optional
 from datetime import datetime
 
 reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
-# Use JWT_SECRET_KEY to match auth routes
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 # Minimum characters required for review content
 MIN_REVIEW_CONTENT_LENGTH = 10
-
-# JWT token verification
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        # Skip authentication in testing mode
-        if current_app.config.get('TESTING'):
-            # In test mode, set current_user_id from request headers or default to 1
-            current_user_id = 1  # Default test user
-            return f(current_user_id, *args, **kwargs)
-        
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = token.split(' ')[1]
-            data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            current_user_id = data['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Token is invalid'}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
-
-
-def token_optional(f):
-    """Decorator that optionally validates JWT token."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        current_user_id = None
-        
-        if token:
-            try:
-                token = token.split(' ')[1]
-                data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-                current_user_id = data['user_id']
-            except:
-                pass  # Token invalid, but that's ok - it's optional
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
 
 
 @reviews_bp.route('', methods=['GET'])
