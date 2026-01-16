@@ -221,6 +221,81 @@ def phone_verify():
         return jsonify({'error': 'Phone verification failed'}), 500
 
 
+@auth_bp.route('/phone/link', methods=['POST'])
+@token_required
+def phone_link(current_user_id):
+    """Link a verified phone number to an existing user account.
+    
+    This is for users who registered with email and need to add phone verification.
+    
+    Request body:
+        - idToken: Firebase ID token from frontend
+        - phoneNumber: Phone number (for verification)
+        
+    Returns:
+        - user: Updated user object with phone_verified=true
+    """
+    try:
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if not user.is_active:
+            return jsonify({'error': 'Account is disabled'}), 403
+        
+        data = request.get_json()
+        
+        if not data or 'idToken' not in data:
+            return jsonify({'error': 'Firebase ID token is required'}), 400
+        
+        id_token = data['idToken']
+        
+        # Verify Firebase token
+        try:
+            firebase_data = verify_firebase_token(id_token)
+        except ValueError as e:
+            current_app.logger.warning(f"Firebase token verification failed: {e}")
+            return jsonify({'error': str(e)}), 401
+        
+        # Get verified phone number from Firebase
+        verified_phone = firebase_data.get('phone_number')
+        
+        if not verified_phone:
+            return jsonify({'error': 'Phone number not verified in token'}), 401
+        
+        # Normalize phone number
+        normalized_phone = normalize_phone_number(verified_phone)
+        
+        # Check if this phone is already linked to another account
+        existing_user = User.query.filter_by(phone=normalized_phone).first()
+        if existing_user and existing_user.id != user.id:
+            return jsonify({
+                'error': 'This phone number is already linked to another account'
+            }), 409
+        
+        # Link phone to user account
+        user.phone = normalized_phone
+        user.phone_verified = True
+        user.is_verified = True  # Mark user as verified
+        user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        current_app.logger.info(f"Phone linked to user {user.id}: {normalized_phone}")
+        
+        return jsonify({
+            'message': 'Phone number verified and linked successfully',
+            'user': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Phone link error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
+        return jsonify({'error': 'Failed to link phone number'}), 500
+
+
 @auth_bp.route('/phone/check/<phone>', methods=['GET'])
 def phone_check(phone):
     """Check if a phone number is already registered.
