@@ -6,8 +6,10 @@ after users complete phone number verification via Firebase Auth.
 
 import requests
 from flask import current_app
-from functools import lru_cache
 import time
+import jwt
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 
 # Firebase project ID - should match your Firebase project
 FIREBASE_PROJECT_ID = 'tirgus-marketplace'
@@ -26,6 +28,7 @@ def get_google_public_keys():
     """Fetch Google's public keys for verifying Firebase tokens.
     
     Keys are cached for 1 hour to avoid repeated requests.
+    Returns a dict mapping key ID to public key object.
     """
     global _cached_keys, _keys_fetched_at
     
@@ -38,9 +41,30 @@ def get_google_public_keys():
     try:
         response = requests.get(GOOGLE_CERTS_URL, timeout=10)
         response.raise_for_status()
-        _cached_keys = response.json()
+        certs_data = response.json()
+        
+        # Parse X.509 certificates and extract public keys
+        public_keys = {}
+        for kid, cert_pem in certs_data.items():
+            try:
+                # Parse the X.509 certificate
+                cert = x509.load_pem_x509_certificate(
+                    cert_pem.encode('utf-8'),
+                    default_backend()
+                )
+                # Extract the public key
+                public_keys[kid] = cert.public_key()
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse certificate for kid {kid}: {e}")
+                continue
+        
+        if not public_keys:
+            raise ValueError("No valid public keys found in Google's response")
+        
+        _cached_keys = public_keys
         _keys_fetched_at = current_time
         return _cached_keys
+        
     except Exception as e:
         current_app.logger.error(f"Failed to fetch Google public keys: {e}")
         # Return cached keys even if expired, as fallback
@@ -64,8 +88,6 @@ def verify_firebase_token(id_token: str) -> dict:
     Raises:
         ValueError: If token is invalid, expired, or verification fails
     """
-    import jwt
-    from jwt import PyJWKClient
     from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
     
     if not id_token:
@@ -75,9 +97,13 @@ def verify_firebase_token(id_token: str) -> dict:
         # Decode the token header to get the key ID
         unverified_header = jwt.get_unverified_header(id_token)
         kid = unverified_header.get('kid')
+        alg = unverified_header.get('alg')
         
         if not kid:
             raise ValueError("Token missing key ID (kid)")
+        
+        if alg != 'RS256':
+            raise ValueError(f"Unexpected algorithm: {alg}")
         
         # Get Google's public keys
         public_keys = get_google_public_keys()
@@ -89,15 +115,15 @@ def verify_firebase_token(id_token: str) -> dict:
             public_keys = get_google_public_keys()
             
             if kid not in public_keys:
-                raise ValueError("Token signed with unknown key")
+                raise ValueError(f"Token signed with unknown key: {kid}")
         
-        # Get the certificate for this key ID
-        certificate = public_keys[kid]
+        # Get the public key for this key ID
+        public_key = public_keys[kid]
         
         # Verify and decode the token
         decoded = jwt.decode(
             id_token,
-            certificate,
+            public_key,
             algorithms=['RS256'],
             audience=FIREBASE_PROJECT_ID,
             issuer=FIREBASE_ISSUER
@@ -107,11 +133,11 @@ def verify_firebase_token(id_token: str) -> dict:
         if 'phone_number' not in decoded:
             raise ValueError("Token does not contain phone number claim")
         
-        if not decoded.get('uid'):
-            raise ValueError("Token does not contain user ID")
+        if not decoded.get('sub'):
+            raise ValueError("Token does not contain subject (user ID)")
         
         return {
-            'uid': decoded['uid'],
+            'uid': decoded['sub'],
             'phone_number': decoded['phone_number'],
             'auth_time': decoded.get('auth_time'),
             'firebase_user': decoded
