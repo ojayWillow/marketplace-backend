@@ -3,45 +3,11 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import User, Conversation, Message
+from app.utils import token_required, get_display_name, send_push_safe
 from datetime import datetime
-from functools import wraps
 from sqlalchemy import or_, and_
-import jwt
-import os
 
 messages_bp = Blueprint('messages', __name__)
-
-# Use same secret key as auth.py
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
-
-
-def token_required(f):
-    """Decorator to require valid JWT token."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        
-        if not auth_header:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            current_user_id = payload['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
-
-
-def get_display_name(user):
-    """Get the best display name for a user."""
-    if user.first_name:
-        return user.first_name
-    return user.username or 'Someone'
 
 
 @messages_bp.route('/conversations', methods=['GET'])
@@ -115,17 +81,15 @@ def create_conversation(current_user_id):
                 db.session.commit()
                 
                 # Send push notification for the message
-                try:
-                    from app.services.push_notifications import notify_new_message
-                    sender_name = get_display_name(sender)
-                    notify_new_message(
-                        recipient_id=other_user_id,
-                        sender_name=sender_name,
-                        message_preview=initial_message,
-                        conversation_id=existing_conversation.id
-                    )
-                except Exception as push_error:
-                    print(f'Push notification error: {push_error}')
+                from app.services.push_notifications import notify_new_message
+                sender_name = get_display_name(sender)
+                send_push_safe(
+                    notify_new_message,
+                    recipient_id=other_user_id,
+                    sender_name=sender_name,
+                    message_preview=initial_message,
+                    conversation_id=existing_conversation.id
+                )
             
             return jsonify({
                 'conversation': existing_conversation.to_dict(current_user_id),
@@ -155,17 +119,15 @@ def create_conversation(current_user_id):
         
         # Send push notification for initial message
         if initial_message:
-            try:
-                from app.services.push_notifications import notify_new_message
-                sender_name = get_display_name(sender)
-                notify_new_message(
-                    recipient_id=other_user_id,
-                    sender_name=sender_name,
-                    message_preview=initial_message,
-                    conversation_id=conversation.id
-                )
-            except Exception as push_error:
-                print(f'Push notification error: {push_error}')
+            from app.services.push_notifications import notify_new_message
+            sender_name = get_display_name(sender)
+            send_push_safe(
+                notify_new_message,
+                recipient_id=other_user_id,
+                sender_name=sender_name,
+                message_preview=initial_message,
+                conversation_id=conversation.id
+            )
         
         return jsonify({
             'conversation': conversation.to_dict(current_user_id),
@@ -282,29 +244,26 @@ def send_message(current_user_id, conversation_id):
         db.session.commit()
         
         # Send push notification to the other participant
-        try:
-            from app.services.push_notifications import notify_new_message
-            
-            # Determine recipient (the other participant)
-            recipient_id = (
-                conversation.participant_2_id 
-                if conversation.participant_1_id == current_user_id 
-                else conversation.participant_1_id
-            )
-            
-            # Get sender name
-            sender = User.query.get(current_user_id)
-            sender_name = get_display_name(sender)
-            
-            notify_new_message(
-                recipient_id=recipient_id,
-                sender_name=sender_name,
-                message_preview=content,
-                conversation_id=conversation_id
-            )
-        except Exception as push_error:
-            # Don't fail the request if push fails
-            print(f'Push notification error: {push_error}')
+        from app.services.push_notifications import notify_new_message
+        
+        # Determine recipient (the other participant)
+        recipient_id = (
+            conversation.participant_2_id 
+            if conversation.participant_1_id == current_user_id 
+            else conversation.participant_1_id
+        )
+        
+        # Get sender name
+        sender = User.query.get(current_user_id)
+        sender_name = get_display_name(sender)
+        
+        send_push_safe(
+            notify_new_message,
+            recipient_id=recipient_id,
+            sender_name=sender_name,
+            message_preview=content,
+            conversation_id=conversation_id
+        )
         
         return jsonify({
             'message': message.to_dict()
