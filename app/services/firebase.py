@@ -12,7 +12,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
 # Firebase project ID - should match your Firebase project
-FIREBASE_PROJECT_ID = 'tirgus-marketplace'
+FIREBASE_PROJECT_ID = 'quickhelp-84c3a'
 
 # Google's public keys endpoint for verifying Firebase tokens
 GOOGLE_CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
