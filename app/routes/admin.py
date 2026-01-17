@@ -1,9 +1,21 @@
 """Admin routes for database management."""
 from flask import Blueprint, jsonify, request
 from app import db
+from app.models import User
 import os
 
 admin_bp = Blueprint('admin', __name__)
+
+# Simple admin secret for protected operations
+# In production, use environment variable: ADMIN_SECRET
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'tirgus-admin-2026')
+
+
+def check_admin_secret():
+    """Check if request has valid admin secret."""
+    secret = request.headers.get('X-Admin-Secret') or request.args.get('secret')
+    return secret == ADMIN_SECRET
+
 
 @admin_bp.route('/init-db', methods=['GET', 'POST'])
 def init_database():
@@ -21,6 +33,7 @@ def init_database():
             'status': 'error',
             'message': f'Failed to initialize database: {str(e)}'
         }), 500
+
 
 @admin_bp.route('/migrate-db', methods=['GET', 'POST'])
 def migrate_database():
@@ -109,6 +122,7 @@ def migrate_database():
             'details': results
         }), 500
 
+
 @admin_bp.route('/db-status', methods=['GET'])
 def database_status():
     """Check database connection status."""
@@ -123,5 +137,148 @@ def database_status():
         return jsonify({
             'status': 'error',
             'database': 'disconnected',
+            'message': str(e)
+        }), 500
+
+
+# ============================================================================
+# USER MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/user/by-phone/<phone>', methods=['GET'])
+def get_user_by_phone(phone):
+    """Get user details by phone number.
+    
+    Requires admin secret in header or query param.
+    """
+    if not check_admin_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Normalize phone - ensure it has + prefix
+        normalized_phone = phone if phone.startswith('+') else f'+{phone}'
+        
+        user = User.query.filter_by(phone=normalized_phone).first()
+        
+        if not user:
+            return jsonify({
+                'status': 'not_found',
+                'message': f'No user found with phone: {normalized_phone}'
+            }), 404
+        
+        return jsonify({
+            'status': 'found',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'phone': user.phone,
+                'phone_verified': user.phone_verified,
+                'is_verified': user.is_verified,
+                'created_at': user.created_at.isoformat() if user.created_at else None
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@admin_bp.route('/user/by-phone/<phone>', methods=['DELETE'])
+def delete_user_by_phone(phone):
+    """Delete a user by their phone number.
+    
+    Requires admin secret in header or query param.
+    
+    Example:
+        DELETE /api/admin/user/by-phone/+37125953807?secret=your-secret
+        
+        or with header:
+        DELETE /api/admin/user/by-phone/+37125953807
+        X-Admin-Secret: your-secret
+    """
+    if not check_admin_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Normalize phone - ensure it has + prefix
+        normalized_phone = phone if phone.startswith('+') else f'+{phone}'
+        
+        user = User.query.filter_by(phone=normalized_phone).first()
+        
+        if not user:
+            return jsonify({
+                'status': 'not_found',
+                'message': f'No user found with phone: {normalized_phone}'
+            }), 404
+        
+        # Store user info for response
+        user_info = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'phone': user.phone
+        }
+        
+        # Delete the user
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'User deleted successfully',
+            'deleted_user': user_info
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@admin_bp.route('/user/<int:user_id>', methods=['DELETE'])
+def delete_user_by_id(user_id):
+    """Delete a user by their ID.
+    
+    Requires admin secret in header or query param.
+    """
+    if not check_admin_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({
+                'status': 'not_found',
+                'message': f'No user found with ID: {user_id}'
+            }), 404
+        
+        # Store user info for response
+        user_info = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'phone': user.phone
+        }
+        
+        # Delete the user
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'User deleted successfully',
+            'deleted_user': user_info
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
             'message': str(e)
         }), 500
