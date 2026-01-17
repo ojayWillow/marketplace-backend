@@ -132,6 +132,7 @@ def phone_verify():
     Returns:
         - access_token: Our app's JWT for API calls
         - user: User object
+        - is_new_user: Boolean indicating if this is a newly created account
     """
     try:
         data = request.get_json()
@@ -169,6 +170,7 @@ def phone_verify():
         
         # Find or create user by phone number
         user = User.query.filter_by(phone=normalized_phone).first()
+        is_new_user = False
         
         if user:
             # Existing user - update phone verification status
@@ -182,6 +184,7 @@ def phone_verify():
             current_app.logger.info(f"Phone login: existing user {user.id}")
         else:
             # New user - create account with phone
+            is_new_user = True
             temp_username = generate_temp_username()
             temp_email = f"{temp_username}@phone.tirgus.local"  # Placeholder email
             
@@ -211,7 +214,8 @@ def phone_verify():
         return jsonify({
             'message': 'Phone verification successful',
             'access_token': token,
-            'user': user.to_dict()
+            'user': user.to_dict(),
+            'is_new_user': is_new_user
         }), 200
         
     except Exception as e:
