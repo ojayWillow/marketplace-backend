@@ -145,6 +145,63 @@ def database_status():
 # USER MANAGEMENT ENDPOINTS
 # ============================================================================
 
+@admin_bp.route('/users/delete-all', methods=['DELETE', 'POST'])
+def delete_all_users():
+    """Delete ALL users from the database.
+    
+    ⚠️  CAUTION: This will permanently delete all user accounts!
+    
+    Requires admin secret in header or query param.
+    
+    Example:
+        DELETE /api/admin/users/delete-all?secret=tirgus-admin-2026
+        
+        or with header:
+        DELETE /api/admin/users/delete-all
+        X-Admin-Secret: tirgus-admin-2026
+    """
+    if not check_admin_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Count users before deletion
+        user_count = User.query.count()
+        
+        if user_count == 0:
+            return jsonify({
+                'status': 'success',
+                'message': 'No users to delete',
+                'deleted_count': 0
+            }), 200
+        
+        # Get some info about users for logging
+        users_info = []
+        for user in User.query.limit(10).all():
+            users_info.append({
+                'id': user.id,
+                'username': user.username,
+                'phone': user.phone
+            })
+        
+        # Delete all users
+        User.query.delete()
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Successfully deleted all {user_count} users',
+            'deleted_count': user_count,
+            'sample_deleted_users': users_info  # Show first 10 for confirmation
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to delete users: {str(e)}'
+        }), 500
+
+
 @admin_bp.route('/user/by-phone/<phone>', methods=['GET'])
 def get_user_by_phone(phone):
     """Get user details by phone number.
