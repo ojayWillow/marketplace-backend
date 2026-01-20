@@ -13,7 +13,7 @@ import traceback
 import secrets
 import string
 from sqlalchemy.orm import joinedload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -718,6 +718,16 @@ def get_user_public(user_id):
         if reviews_received:
             avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
         
+        # Calculate completed tasks count
+        # Count tasks where user was creator OR assigned helper, and status is 'completed'
+        completed_tasks_count = TaskRequest.query.filter(
+            or_(
+                TaskRequest.creator_id == user_id,
+                TaskRequest.assigned_to_id == user_id
+            ),
+            TaskRequest.status == 'completed'
+        ).count()
+        
         public_data = {
             'id': user.id,
             'username': user.username,
@@ -733,6 +743,7 @@ def get_user_public(user_id):
             'completion_rate': user.completion_rate,
             'reviews_count': len(reviews_received),
             'average_rating': round(avg_rating, 1),
+            'completed_tasks_count': completed_tasks_count,
             'is_helper': user.is_helper,
             'skills': user.skills.split(',') if user.skills else [],
             'helper_categories': user.helper_categories.split(',') if user.helper_categories else [],
