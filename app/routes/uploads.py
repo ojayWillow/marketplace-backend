@@ -6,8 +6,10 @@ import uuid
 from werkzeug.utils import secure_filename
 import jwt
 from functools import wraps
+import logging
 
 uploads_bp = Blueprint('uploads', __name__)
+logger = logging.getLogger(__name__)
 
 # Use the same key as Flask-JWT-Extended configuration
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
@@ -21,6 +23,7 @@ def token_required(f):
     def decorated(*args, **kwargs):
         token = request.headers.get('Authorization')
         if not token:
+            logger.warning('Upload attempt without auth token')
             return jsonify({'error': 'Token is missing'}), 401
         
         try:
@@ -28,8 +31,10 @@ def token_required(f):
             data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
             current_user_id = data['user_id']
         except jwt.ExpiredSignatureError:
+            logger.warning('Upload attempt with expired token')
             return jsonify({'error': 'Token has expired'}), 401
         except Exception as e:
+            logger.warning(f'Upload attempt with invalid token: {e}')
             return jsonify({'error': 'Token is invalid'}), 401
         
         return f(current_user_id, *args, **kwargs)
@@ -52,18 +57,29 @@ def get_upload_folder():
 def upload_file(current_user_id):
     """Upload an image file."""
     try:
+        # Log request details for debugging
+        logger.info(f'Upload request from user {current_user_id}')
+        logger.info(f'Content-Type: {request.content_type}')
+        logger.info(f'Files in request: {list(request.files.keys())}')
+        logger.info(f'Form data: {list(request.form.keys())}')
+        
         # Check if file is in request
         if 'file' not in request.files:
+            logger.error(f'No file field in request. Available fields: {list(request.files.keys())}')
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
         
         # Check if file is selected
         if file.filename == '':
+            logger.error('File field is empty')
             return jsonify({'error': 'No file selected'}), 400
+        
+        logger.info(f'Received file: {file.filename}, content_type: {file.content_type}')
         
         # Check file extension
         if not allowed_file(file.filename):
+            logger.error(f'File type not allowed: {file.filename}. Allowed: {ALLOWED_EXTENSIONS}')
             return jsonify({'error': f'File type not allowed. Allowed types: {ALLOWED_EXTENSIONS}'}), 400
         
         # Check file size
@@ -71,7 +87,10 @@ def upload_file(current_user_id):
         file_size = file.tell()
         file.seek(0)  # Seek back to start
         
+        logger.info(f'File size: {file_size} bytes ({file_size / (1024*1024):.2f}MB)')
+        
         if file_size > MAX_FILE_SIZE:
+            logger.error(f'File too large: {file_size} bytes (max: {MAX_FILE_SIZE})')
             return jsonify({'error': f'File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB'}), 400
         
         # Generate unique filename
@@ -84,6 +103,8 @@ def upload_file(current_user_id):
         filepath = os.path.join(upload_folder, unique_filename)
         file.save(filepath)
         
+        logger.info(f'File saved successfully: {unique_filename}')
+        
         # Return URL
         file_url = f"/api/uploads/{unique_filename}"
         
@@ -94,6 +115,7 @@ def upload_file(current_user_id):
         }), 201
         
     except Exception as e:
+        logger.error(f'Upload error: {str(e)}', exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @uploads_bp.route('/<filename>', methods=['GET'])
@@ -103,6 +125,7 @@ def get_file(filename):
         upload_folder = get_upload_folder()
         return send_from_directory(upload_folder, filename)
     except Exception as e:
+        logger.error(f'File retrieval error: {str(e)}')
         return jsonify({'error': 'File not found'}), 404
 
 @uploads_bp.route('/<filename>', methods=['DELETE'])
@@ -115,9 +138,12 @@ def delete_file(current_user_id, filename):
         
         if os.path.exists(filepath):
             os.remove(filepath)
+            logger.info(f'File deleted by user {current_user_id}: {filename}')
             return jsonify({'message': 'File deleted successfully'}), 200
         else:
+            logger.warning(f'Delete attempt for non-existent file: {filename}')
             return jsonify({'error': 'File not found'}), 404
             
     except Exception as e:
+        logger.error(f'Delete error: {str(e)}', exc_info=True)
         return jsonify({'error': str(e)}), 500
