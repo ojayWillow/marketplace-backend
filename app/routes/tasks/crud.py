@@ -15,6 +15,9 @@ from app.routes.tasks.helpers import (
 )
 from datetime import datetime
 import jwt
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_user_id_optional():
@@ -166,6 +169,8 @@ def create_task():
     try:
         data = request.get_json()
         
+        logger.info(f'Creating task with data: {data}')
+        
         if not all(k in data for k in ['title', 'description', 'category', 'creator_id', 'latitude', 'longitude', 'location']):
             return jsonify({'error': 'Missing required fields'}), 400
         
@@ -187,11 +192,14 @@ def create_task():
             budget=data.get('budget'),
             deadline=deadline,
             priority=data.get('priority', 'normal'),
-            is_urgent=data.get('is_urgent', False)
+            is_urgent=data.get('is_urgent', False),
+            images=data.get('images')  # ← ADD THIS!
         )
         
         db.session.add(task)
         db.session.commit()
+        
+        logger.info(f'Task created successfully: {task.id}, images: {task.images}')
         
         return jsonify({
             'message': 'Task created successfully',
@@ -199,6 +207,7 @@ def create_task():
         }), 201
     except Exception as e:
         db.session.rollback()
+        logger.error(f'Error creating task: {str(e)}', exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -237,6 +246,8 @@ def update_task(current_user_id, task_id):
             task.priority = data['priority']
         if 'is_urgent' in data:
             task.is_urgent = data['is_urgent']
+        if 'images' in data:  # ← ADD THIS!
+            task.images = data['images']
         
         if 'deadline' in data:
             if data['deadline']:
