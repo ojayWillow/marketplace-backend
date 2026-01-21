@@ -4,6 +4,7 @@ This package organizes task-related routes into logical submodules:
 - crud: Basic task operations (list, get, create, update)
 - applications: Job application system (apply, accept, reject, withdraw)
 - workflow: Task lifecycle (mark-done, confirm, dispute, cancel)
+- search: Multilingual task search
 - helpers: Shared utilities (distance calc, translation, etc.)
 """
 
@@ -24,3 +25,4 @@ from app.routes.tasks import crud
 from app.routes.tasks import applications
 from app.routes.tasks import workflow
 from app.routes.tasks import queries
+from app.routes.tasks import search
