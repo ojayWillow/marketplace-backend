@@ -2,6 +2,7 @@
 
 from flask import request, jsonify
 from sqlalchemy.orm import joinedload
+from sqlalchemy import func
 from app import db
 from app.models import TaskRequest, User, TaskApplication
 from app.utils import token_required
@@ -11,7 +12,6 @@ from app.routes.tasks.helpers import (
     get_bounding_box,
     distance,
     translate_task_if_needed,
-    get_pending_applications_count
 )
 from datetime import datetime
 import jwt
@@ -31,6 +31,57 @@ def get_current_user_id_optional():
         return payload.get('user_id')
     except:
         return None
+
+
+def get_pending_applications_counts(task_ids: list[int]) -> dict[int, int]:
+    """
+    Get pending applications count for multiple tasks in a SINGLE query.
+    Returns dict mapping task_id -> count
+    """
+    if not task_ids:
+        return {}
+    
+    try:
+        results = db.session.query(
+            TaskApplication.task_id,
+            func.count(TaskApplication.id)
+        ).filter(
+            TaskApplication.task_id.in_(task_ids),
+            TaskApplication.status == 'pending'
+        ).group_by(TaskApplication.task_id).all()
+        
+        # Convert to dict, defaulting to 0 for tasks with no applications
+        counts = {task_id: 0 for task_id in task_ids}
+        for task_id, count in results:
+            counts[task_id] = count
+        return counts
+    except Exception as e:
+        logger.error(f"Error fetching application counts: {e}")
+        return {task_id: 0 for task_id in task_ids}
+
+
+def batch_translate_tasks(tasks_list: list[dict], lang: str | None) -> list[dict]:
+    """
+    Translate multiple tasks efficiently.
+    Only translates if lang is provided and translation is enabled.
+    """
+    if not lang or not tasks_list:
+        return tasks_list
+    
+    # Quick check if translation is even enabled
+    try:
+        from app.services.translation import is_translation_enabled
+        if not is_translation_enabled():
+            return tasks_list
+    except:
+        return tasks_list
+    
+    # Translate each task (translation service handles caching)
+    # Future optimization: could batch all texts in single API call
+    for task in tasks_list:
+        task = translate_task_if_needed(task, lang)
+    
+    return tasks_list
 
 
 @tasks_bp.route('', methods=['GET'])
@@ -85,32 +136,54 @@ def get_tasks():
                 if dist <= radius:
                     task_dict = task.to_dict()
                     task_dict['distance'] = round(dist, 2)
-                    task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
-                    task_dict = translate_task_if_needed(task_dict, lang)
-                    tasks_with_distance.append(task_dict)
+                    tasks_with_distance.append((task.id, task_dict))
             
-            tasks_with_distance.sort(key=lambda x: x['distance'])
+            # Sort by distance
+            tasks_with_distance.sort(key=lambda x: x[1]['distance'])
             
+            # Pagination
             total = len(tasks_with_distance)
             start = (page - 1) * per_page
             end = start + per_page
-            paginated_results = tasks_with_distance[start:end]
+            paginated = tasks_with_distance[start:end]
+            
+            # Get task IDs and dicts
+            task_ids = [t[0] for t in paginated]
+            tasks_list = [t[1] for t in paginated]
+            
+            # BATCH: Get all pending counts in ONE query
+            pending_counts = get_pending_applications_counts(task_ids)
+            for i, task_dict in enumerate(tasks_list):
+                task_dict['pending_applications_count'] = pending_counts.get(task_ids[i], 0)
+            
+            # BATCH: Translate all tasks
+            tasks_list = batch_translate_tasks(tasks_list, lang)
             
             return jsonify({
-                'tasks': paginated_results,
+                'tasks': tasks_list,
                 'total': total,
                 'page': page,
                 'per_page': per_page,
                 'has_more': end < total
             }), 200
         else:
+            # No location filtering
             tasks = query.order_by(TaskRequest.created_at.desc()).paginate(page=page, per_page=per_page)
             
+            # Convert to dicts and collect IDs
+            task_ids = []
             tasks_list = []
             for task in tasks.items:
-                task_dict = translate_task_if_needed(task.to_dict(), lang)
-                task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
-                tasks_list.append(task_dict)
+                task_ids.append(task.id)
+                tasks_list.append(task.to_dict())
+            
+            # BATCH: Get all pending counts in ONE query
+            pending_counts = get_pending_applications_counts(task_ids)
+            for i, task_dict in enumerate(tasks_list):
+                task_dict['pending_applications_count'] = pending_counts.get(task_ids[i], 0)
+            
+            # BATCH: Translate all tasks
+            tasks_list = batch_translate_tasks(tasks_list, lang)
             
             return jsonify({
                 'tasks': tasks_list,
@@ -121,6 +194,7 @@ def get_tasks():
             }), 200
             
     except Exception as e:
+        logger.error(f"Error in get_tasks: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -142,8 +216,14 @@ def get_task(task_id):
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
-        task_dict = translate_task_if_needed(task.to_dict(), lang)
-        task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
+        task_dict = task.to_dict()
+        
+        # Single query for this task's pending count
+        pending_counts = get_pending_applications_counts([task_id])
+        task_dict['pending_applications_count'] = pending_counts.get(task_id, 0)
+        
+        # Translate if needed
+        task_dict = translate_task_if_needed(task_dict, lang)
         
         # Check if current user has applied (if authenticated)
         current_user_id = get_current_user_id_optional()
@@ -193,7 +273,7 @@ def create_task():
             deadline=deadline,
             priority=data.get('priority', 'normal'),
             is_urgent=data.get('is_urgent', False),
-            images=data.get('images')  # ← ADD THIS!
+            images=data.get('images')
         )
         
         db.session.add(task)
@@ -246,7 +326,7 @@ def update_task(current_user_id, task_id):
             task.priority = data['priority']
         if 'is_urgent' in data:
             task.is_urgent = data['is_urgent']
-        if 'images' in data:  # ← ADD THIS!
+        if 'images' in data:
             task.images = data['images']
         
         if 'deadline' in data:
