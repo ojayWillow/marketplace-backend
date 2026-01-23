@@ -40,11 +40,14 @@ class TaskApplication(db.Model):
                 status='completed'
             ).count()
         
-        # Count reviews received by applicant
+        # Get actual rating from reviews (not reputation_score field)
+        applicant_rating = 0
         review_count = 0
         if self.applicant:
-            from app.models.review import Review
-            review_count = Review.query.filter_by(reviewed_user_id=self.applicant_id).count()
+            # Use the @property rating which calculates from Review table
+            calculated_rating = self.applicant.rating
+            applicant_rating = calculated_rating if calculated_rating is not None else 0
+            review_count = self.applicant.review_count
         
         # Get avatar URL safely
         applicant_avatar = None
@@ -58,7 +61,7 @@ class TaskApplication(db.Model):
             'applicant_name': applicant_name,
             'applicant_email': self.applicant.email if self.applicant else None,
             'applicant_avatar': applicant_avatar,
-            'applicant_rating': self.applicant.reputation_score if self.applicant else 0,
+            'applicant_rating': applicant_rating,  # Now uses calculated rating from reviews
             'applicant_review_count': review_count,
             'applicant_completed_tasks': completed_tasks_count,
             'applicant_member_since': self.applicant.created_at.isoformat() if self.applicant and self.applicant.created_at else None,
