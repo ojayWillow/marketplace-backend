@@ -54,8 +54,9 @@ class Offering(db.Model):
         # Get creator info from already-loaded relationship (no extra query!)
         creator_name = None
         creator_avatar = None
+        creator_city = None
         creator_rating = None
-        creator_review_count = 0
+        creator_review_count = None
         creator_completed_tasks = 0
         
         # Use self.creator which is already loaded via eager loading
@@ -65,10 +66,11 @@ class Offering(db.Model):
                 creator_name = f"{creator.first_name} {creator.last_name}"
             else:
                 creator_name = creator.username
-            # Use correct field names from User model
             creator_avatar = creator.avatar_url or creator.profile_picture_url
-            creator_rating = creator.reputation_score or 0
-            creator_review_count = 0  # User model doesn't have review_count
+            creator_city = creator.city
+            # Use actual rating and review_count from User model properties
+            creator_rating = creator.rating
+            creator_review_count = creator.review_count
             creator_completed_tasks = int(creator.completion_rate) if creator.completion_rate else 0
         
         return {
@@ -86,6 +88,7 @@ class Offering(db.Model):
             'creator_id': self.creator_id,
             'creator_name': creator_name,
             'creator_avatar': creator_avatar,
+            'creator_city': creator_city,
             'creator_rating': creator_rating,
             'creator_review_count': creator_review_count,
             'creator_completed_tasks': creator_completed_tasks,
