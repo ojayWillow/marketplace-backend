@@ -24,6 +24,7 @@ class TaskRequest(db.Model):
     required_skills = db.Column(db.JSON, nullable=True)  # Array of required skills
     images = db.Column(db.JSON, nullable=True)  # Array of image URLs
     priority = db.Column(db.String(20), default='normal', nullable=False)  # 'low', 'normal', 'high', 'urgent'
+    difficulty = db.Column(db.String(10), default='medium', nullable=False)  # 'easy', 'medium', 'hard'
     status = db.Column(db.String(20), default='open', nullable=False, index=True)  # 'open', 'assigned', 'in_progress', 'completed', 'cancelled'
     deadline = db.Column(db.DateTime, nullable=True)
     responses_count = db.Column(db.Integer, default=0, nullable=False)
@@ -43,8 +44,13 @@ class TaskRequest(db.Model):
         """
         from app.models import User
         
-        # Get creator name - try relationship first, fallback to query
+        # Get creator info - try relationship first, fallback to query
         creator_name = None
+        creator_avatar = None
+        creator_city = None
+        creator_rating = None
+        creator_review_count = None
+        
         if self.creator_id:
             # Use the relationship if available (eager loaded from User model)
             creator = getattr(self, 'creator', None)
@@ -55,6 +61,10 @@ class TaskRequest(db.Model):
                     creator_name = f"{creator.first_name} {creator.last_name}"
                 else:
                     creator_name = creator.username
+                creator_avatar = creator.avatar_url
+                creator_city = creator.city
+                creator_rating = creator.rating
+                creator_review_count = creator.review_count
         
         # Get assigned user name - try relationship first, fallback to query
         assigned_to_name = None
@@ -81,12 +91,17 @@ class TaskRequest(db.Model):
             'longitude': self.longitude,
             'creator_id': self.creator_id,
             'creator_name': creator_name,
+            'creator_avatar': creator_avatar,
+            'creator_city': creator_city,
+            'creator_rating': creator_rating,
+            'creator_review_count': creator_review_count,
             'assigned_to_id': self.assigned_to_id,
             'assigned_to_name': assigned_to_name,
             'radius': self.radius,
             'required_skills': self.required_skills,
             'images': self.images,
             'priority': self.priority,
+            'difficulty': self.difficulty,
             'status': self.status,
             'deadline': self.deadline.isoformat() if self.deadline else None,
             'responses_count': self.responses_count,
