@@ -60,6 +60,25 @@ def get_pending_applications_counts(task_ids: list[int]) -> dict[int, int]:
         return {task_id: 0 for task_id in task_ids}
 
 
+def get_user_applied_task_ids(user_id: int | None, task_ids: list[int]) -> set[int]:
+    """
+    Get set of task IDs that the user has applied to (any status).
+    Returns empty set if user_id is None or no applications found.
+    """
+    if not user_id or not task_ids:
+        return set()
+    
+    try:
+        results = db.session.query(TaskApplication.task_id).filter(
+            TaskApplication.task_id.in_(task_ids),
+            TaskApplication.applicant_id == user_id
+        ).all()
+        return {r[0] for r in results}
+    except Exception as e:
+        logger.error(f"Error fetching user applications: {e}")
+        return set()
+
+
 def batch_translate_tasks(tasks_list: list[dict], lang: str | None) -> list[dict]:
     """
     Translate multiple tasks efficiently.
@@ -95,6 +114,9 @@ def get_tasks():
         - status: Task status filter (default 'open')
         - category: Category filter
         - page, per_page: Pagination
+    
+    If authenticated, each task includes:
+        - has_applied: boolean indicating if current user has applied
     """
     try:
         page = request.args.get('page', 1, type=int)
@@ -105,6 +127,9 @@ def get_tasks():
         longitude = request.args.get('longitude', type=float)
         radius = request.args.get('radius', 10, type=float)
         lang = request.args.get('lang')
+        
+        # Get current user ID if authenticated (for has_applied check)
+        current_user_id = get_current_user_id_optional()
         
         # Build base query with eager loading
         query = TaskRequest.query.options(
@@ -153,8 +178,13 @@ def get_tasks():
             
             # BATCH: Get all pending counts in ONE query
             pending_counts = get_pending_applications_counts(task_ids)
+            
+            # BATCH: Get user's applied task IDs in ONE query
+            user_applied_ids = get_user_applied_task_ids(current_user_id, task_ids)
+            
             for i, task_dict in enumerate(tasks_list):
                 task_dict['pending_applications_count'] = pending_counts.get(task_ids[i], 0)
+                task_dict['has_applied'] = task_ids[i] in user_applied_ids
             
             # BATCH: Translate all tasks
             tasks_list = batch_translate_tasks(tasks_list, lang)
@@ -179,8 +209,13 @@ def get_tasks():
             
             # BATCH: Get all pending counts in ONE query
             pending_counts = get_pending_applications_counts(task_ids)
+            
+            # BATCH: Get user's applied task IDs in ONE query
+            user_applied_ids = get_user_applied_task_ids(current_user_id, task_ids)
+            
             for i, task_dict in enumerate(tasks_list):
                 task_dict['pending_applications_count'] = pending_counts.get(task_ids[i], 0)
+                task_dict['has_applied'] = task_ids[i] in user_applied_ids
             
             # BATCH: Translate all tasks
             tasks_list = batch_translate_tasks(tasks_list, lang)
