@@ -24,7 +24,6 @@ class TaskRequest(db.Model):
     required_skills = db.Column(db.JSON, nullable=True)  # Array of required skills
     images = db.Column(db.JSON, nullable=True)  # Array of image URLs
     priority = db.Column(db.String(20), default='normal', nullable=False)  # 'low', 'normal', 'high', 'urgent'
-    difficulty = db.Column(db.String(10), default='medium', nullable=False)  # 'easy', 'medium', 'hard'
     status = db.Column(db.String(20), default='open', nullable=False, index=True)  # 'open', 'assigned', 'in_progress', 'completed', 'cancelled'
     deadline = db.Column(db.DateTime, nullable=True)
     responses_count = db.Column(db.Integer, default=0, nullable=False)
@@ -63,6 +62,7 @@ class TaskRequest(db.Model):
                     creator_name = creator.username
                 creator_avatar = creator.avatar_url
                 creator_city = creator.city
+                # Get rating and review_count from User model properties
                 creator_rating = creator.rating
                 creator_review_count = creator.review_count
         
@@ -101,7 +101,6 @@ class TaskRequest(db.Model):
             'required_skills': self.required_skills,
             'images': self.images,
             'priority': self.priority,
-            'difficulty': self.difficulty,
             'status': self.status,
             'deadline': self.deadline.isoformat() if self.deadline else None,
             'responses_count': self.responses_count,
