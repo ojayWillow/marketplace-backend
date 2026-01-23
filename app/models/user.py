@@ -47,6 +47,21 @@ class User(db.Model):
     task_requests = db.relationship('TaskRequest', backref='creator', lazy='dynamic', foreign_keys='TaskRequest.creator_id')
     assigned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy='dynamic', foreign_keys='TaskRequest.assigned_to_id')
     
+    @property
+    def rating(self):
+        """Calculate average rating from reviews received."""
+        from app.models import Review
+        reviews = Review.query.filter_by(reviewed_user_id=self.id).all()
+        if not reviews:
+            return None
+        return sum(r.rating for r in reviews) / len(reviews)
+    
+    @property
+    def review_count(self):
+        """Get total number of reviews received."""
+        from app.models import Review
+        return Review.query.filter_by(reviewed_user_id=self.id).count()
+    
     def set_password(self, password):
         """Hash and set the user password."""
         self.password_hash = generate_password_hash(password)
@@ -136,6 +151,8 @@ class User(db.Model):
             'hourly_rate': self.hourly_rate,
             'latitude': self.latitude,
             'longitude': self.longitude,
+            'rating': self.rating,
+            'review_count': self.review_count,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
@@ -162,6 +179,8 @@ class User(db.Model):
             'skills': self.skills,
             'helper_categories': self.helper_categories,
             'hourly_rate': self.hourly_rate,
+            'rating': self.rating,
+            'review_count': self.review_count,
             'created_at': self.created_at.isoformat(),
             'online_status': self.get_online_status(),
             'last_seen_display': self.get_last_seen_display()
