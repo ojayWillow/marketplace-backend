@@ -261,6 +261,11 @@ def create_task():
             except ValueError:
                 return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
         
+        # Validate difficulty if provided
+        difficulty = data.get('difficulty', 'medium')
+        if difficulty not in ['easy', 'medium', 'hard']:
+            return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
+        
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
@@ -272,6 +277,7 @@ def create_task():
             budget=data.get('budget'),
             deadline=deadline,
             priority=data.get('priority', 'normal'),
+            difficulty=difficulty,
             is_urgent=data.get('is_urgent', False),
             images=data.get('images')
         )
@@ -279,7 +285,7 @@ def create_task():
         db.session.add(task)
         db.session.commit()
         
-        logger.info(f'Task created successfully: {task.id}, images: {task.images}')
+        logger.info(f'Task created successfully: {task.id}, images: {task.images}, difficulty: {task.difficulty}')
         
         return jsonify({
             'message': 'Task created successfully',
@@ -324,6 +330,10 @@ def update_task(current_user_id, task_id):
             task.budget = data['budget']
         if 'priority' in data:
             task.priority = data['priority']
+        if 'difficulty' in data:
+            if data['difficulty'] not in ['easy', 'medium', 'hard']:
+                return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
+            task.difficulty = data['difficulty']
         if 'is_urgent' in data:
             task.is_urgent = data['is_urgent']
         if 'images' in data:
