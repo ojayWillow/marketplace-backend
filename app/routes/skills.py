@@ -3,7 +3,7 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Skill, UserSkill, User
-from app.middleware.auth import token_required
+from app.utils import token_required
 from sqlalchemy import or_
 
 skills_bp = Blueprint('skills', __name__)
@@ -82,9 +82,9 @@ def get_user_skills(user_id):
 
 @skills_bp.route('/api/users/me/skills', methods=['GET'])
 @token_required
-def get_my_skills(current_user):
+def get_my_skills(current_user_id):
     """Get current user's skills."""
-    user_skills = UserSkill.query.filter_by(user_id=current_user.id).all()
+    user_skills = UserSkill.query.filter_by(user_id=current_user_id).all()
     
     return jsonify({
         'skills': [us.to_dict(include_skill=True) for us in user_skills],
@@ -94,7 +94,7 @@ def get_my_skills(current_user):
 
 @skills_bp.route('/api/users/me/skills', methods=['POST'])
 @token_required
-def add_user_skill(current_user):
+def add_user_skill(current_user_id):
     """Add a skill to current user's profile."""
     data = request.get_json()
     
@@ -108,7 +108,7 @@ def add_user_skill(current_user):
     
     # Check if user already has this skill
     existing = UserSkill.query.filter_by(
-        user_id=current_user.id,
+        user_id=current_user_id,
         skill_id=skill.id
     ).first()
     
@@ -133,7 +133,7 @@ def add_user_skill(current_user):
     
     # Create user skill
     user_skill = UserSkill(
-        user_id=current_user.id,
+        user_id=current_user_id,
         skill_id=skill.id,
         proficiency_level=proficiency_level,
         years_experience=years_experience
@@ -150,11 +150,11 @@ def add_user_skill(current_user):
 
 @skills_bp.route('/api/users/me/skills/<int:user_skill_id>', methods=['PUT'])
 @token_required
-def update_user_skill(current_user, user_skill_id):
+def update_user_skill(current_user_id, user_skill_id):
     """Update a user's skill proficiency or experience."""
     user_skill = UserSkill.query.filter_by(
         id=user_skill_id,
-        user_id=current_user.id
+        user_id=current_user_id
     ).first_or_404()
     
     data = request.get_json()
@@ -190,11 +190,11 @@ def update_user_skill(current_user, user_skill_id):
 
 @skills_bp.route('/api/users/me/skills/<int:user_skill_id>', methods=['DELETE'])
 @token_required
-def delete_user_skill(current_user, user_skill_id):
+def delete_user_skill(current_user_id, user_skill_id):
     """Remove a skill from current user's profile."""
     user_skill = UserSkill.query.filter_by(
         id=user_skill_id,
-        user_id=current_user.id
+        user_id=current_user_id
     ).first_or_404()
     
     db.session.delete(user_skill)
