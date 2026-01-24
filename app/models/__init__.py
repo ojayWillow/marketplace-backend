@@ -13,7 +13,6 @@ from .translation_cache import TranslationCache
 from .notification import Notification, NotificationType
 from .password_reset import PasswordResetToken
 from .push_subscription import PushSubscription
-from .skill import Skill, UserSkill
 
 __all__ = [
     'User', 
@@ -30,7 +29,5 @@ __all__ = [
     'Notification', 
     'NotificationType',
     'PasswordResetToken',
-    'PushSubscription',
-    'Skill',
-    'UserSkill'
+    'PushSubscription'
 ]
