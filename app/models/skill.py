@@ -51,7 +51,8 @@ class UserSkill(db.Model):
         db.UniqueConstraint('user_id', 'skill_id', name='unique_user_skill'),
     )
     
-    # Relationships with eager loading to prevent N+1 queries
+    # Relationships with string references to avoid circular imports
+    # Use lazy='joined' for skill to prevent N+1 queries
     user = db.relationship('User', backref=db.backref('user_skills_rel', lazy='dynamic', cascade='all, delete-orphan'))
     skill = db.relationship('Skill', backref=db.backref('user_skills_rel', lazy='dynamic'), lazy='joined')
     
