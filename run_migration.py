@@ -2,7 +2,7 @@
 """Run database migration for message attachments."""
 
 from app import create_app, db
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 def run_migration():
     """Add attachment fields to messages table."""
@@ -10,16 +10,9 @@ def run_migration():
     
     with app.app_context():
         try:
-            # Check if columns already exist
-            result = db.session.execute(text(
-                """
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'messages' 
-                AND column_name IN ('attachment_url', 'attachment_type')
-                """
-            ))
-            existing_columns = [row[0] for row in result]
+            # Use SQLAlchemy inspector to check columns (works for both SQLite and PostgreSQL)
+            inspector = inspect(db.engine)
+            existing_columns = [col['name'] for col in inspector.get_columns('messages')]
             
             if 'attachment_url' in existing_columns and 'attachment_type' in existing_columns:
                 print("✅ Migration already applied! Columns already exist.")
