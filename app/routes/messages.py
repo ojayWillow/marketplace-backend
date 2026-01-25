@@ -177,7 +177,8 @@ def get_messages(current_user_id, conversation_id):
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
         
-        messages_query = conversation.messages.order_by(Message.created_at.desc())
+        # Order by created_at ASC (oldest first) - simple and clear
+        messages_query = conversation.messages.order_by(Message.created_at.asc())
         messages_paginated = messages_query.paginate(page=page, per_page=per_page)
         
         # Mark messages from other user as read
@@ -192,8 +193,8 @@ def get_messages(current_user_id, conversation_id):
         
         db.session.commit()
         
-        # Return messages in chronological order (oldest first for display)
-        messages_list = [msg.to_dict() for msg in reversed(messages_paginated.items)]
+        # Return messages in chronological order (oldest first)
+        messages_list = [msg.to_dict() for msg in messages_paginated.items]
         
         return jsonify({
             'messages': messages_list,
