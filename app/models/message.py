@@ -93,6 +93,10 @@ class Message(db.Model):
     content = db.Column(db.Text, nullable=False)
     is_read = db.Column(db.Boolean, default=False, nullable=False)
     
+    # Attachments
+    attachment_url = db.Column(db.String(500), nullable=True)
+    attachment_type = db.Column(db.String(20), nullable=True)  # 'image', 'file', 'video', 'audio'
+    
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     
@@ -120,6 +124,8 @@ class Message(db.Model):
             'sender': sender_data,
             'content': self.content,
             'is_read': self.is_read,
+            'attachment_url': self.attachment_url,
+            'attachment_type': self.attachment_type,
             'created_at': self.created_at.isoformat()
         }
     
