@@ -2,6 +2,7 @@
 """Run database migration for message attachments."""
 
 from app import create_app, db
+from sqlalchemy import text
 
 def run_migration():
     """Add attachment fields to messages table."""
@@ -10,14 +11,14 @@ def run_migration():
     with app.app_context():
         try:
             # Check if columns already exist
-            result = db.session.execute(
+            result = db.session.execute(text(
                 """
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = 'messages' 
                 AND column_name IN ('attachment_url', 'attachment_type')
                 """
-            )
+            ))
             existing_columns = [row[0] for row in result]
             
             if 'attachment_url' in existing_columns and 'attachment_type' in existing_columns:
@@ -28,16 +29,16 @@ def run_migration():
             
             # Add attachment_url column if not exists
             if 'attachment_url' not in existing_columns:
-                db.session.execute(
+                db.session.execute(text(
                     "ALTER TABLE messages ADD COLUMN attachment_url VARCHAR(500)"
-                )
+                ))
                 print("✅ Added attachment_url column")
             
             # Add attachment_type column if not exists
             if 'attachment_type' not in existing_columns:
-                db.session.execute(
+                db.session.execute(text(
                     "ALTER TABLE messages ADD COLUMN attachment_type VARCHAR(20)"
-                )
+                ))
                 print("✅ Added attachment_type column")
             
             db.session.commit()
