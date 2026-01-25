@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
+from flask_socketio import SocketIO
 import os
 import jwt
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ load_dotenv()
 db = SQLAlchemy()
 migrate = Migrate()
 jwt_manager = JWTManager()
+socketio = SocketIO()
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -54,6 +56,25 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     jwt_manager.init_app(app)
     
+    # Initialize Socket.IO with CORS
+    socketio.init_app(app, 
+                     cors_allowed_origins=[
+                         "http://localhost:3000",
+                         "http://127.0.0.1:3000",
+                         "http://localhost:5173",
+                         "http://127.0.0.1:5173",
+                         "http://localhost:8081",  # Expo dev
+                         "https://marketplace-frontend-tau-seven.vercel.app",
+                         os.environ.get('FRONTEND_URL', ''),
+                     ],
+                     async_mode='eventlet',
+                     logger=True,
+                     engineio_logger=False)
+    
+    # Register socket events
+    from app.socket_events import register_socket_events
+    register_socket_events(socketio)
+    
     # Auto-create tables and constraints on startup
     with app.app_context():
         try:
@@ -71,6 +92,7 @@ def create_app(config_name=None):
              "http://127.0.0.1:3000",
              "http://localhost:5173",
              "http://127.0.0.1:5173",
+             "http://localhost:8081",  # Expo dev
              "https://marketplace-frontend-tau-seven.vercel.app",
              os.environ.get('FRONTEND_URL', ''),  # Allow custom frontend URL
          ],
