@@ -224,17 +224,31 @@ def send_message(current_user_id, conversation_id):
         
         data = request.get_json()
         content = data.get('content', '').strip()
+        attachment_url = data.get('attachment_url')  # Optional file/image URL
+        attachment_type = data.get('attachment_type')  # Optional: 'image', 'file', 'video', 'audio'
         
+        # Content is optional if there's an attachment
+        if not content and not attachment_url:
+            return jsonify({'error': 'Message content or attachment is required'}), 400
+        
+        # Default to empty string if no content but has attachment
         if not content:
-            return jsonify({'error': 'Message content is required'}), 400
+            content = ''
         
         if len(content) > 5000:
             return jsonify({'error': 'Message too long (max 5000 characters)'}), 400
         
+        # Validate attachment_type if provided
+        valid_attachment_types = ['image', 'file', 'video', 'audio']
+        if attachment_type and attachment_type not in valid_attachment_types:
+            return jsonify({'error': f'Invalid attachment_type. Must be one of: {valid_attachment_types}'}), 400
+        
         message = Message(
             conversation_id=conversation_id,
             sender_id=current_user_id,
-            content=content
+            content=content,
+            attachment_url=attachment_url,
+            attachment_type=attachment_type
         )
         
         db.session.add(message)
@@ -258,11 +272,27 @@ def send_message(current_user_id, conversation_id):
         sender = User.query.get(current_user_id)
         sender_name = get_display_name(sender)
         
+        # Create message preview
+        if attachment_url:
+            if attachment_type == 'image':
+                message_preview = '📷 Photo'
+            elif attachment_type == 'video':
+                message_preview = '🎥 Video'
+            elif attachment_type == 'audio':
+                message_preview = '🎵 Audio'
+            else:
+                message_preview = '📎 File'
+            
+            if content:
+                message_preview = f'{message_preview}: {content[:50]}'
+        else:
+            message_preview = content
+        
         send_push_safe(
             notify_new_message,
             recipient_id=recipient_id,
             sender_name=sender_name,
-            message_preview=content,
+            message_preview=message_preview,
             conversation_id=conversation_id
         )
         
