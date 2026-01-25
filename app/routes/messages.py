@@ -1,9 +1,10 @@
 """Message routes for user-to-user communication."""
 
 from flask import Blueprint, request, jsonify
-from app import db
+from app import db, socketio
 from app.models import User, Conversation, Message
 from app.utils import token_required, get_display_name, send_push_safe
+from app.socket_events import emit_new_message
 from datetime import datetime
 from sqlalchemy import or_, and_
 
@@ -80,6 +81,9 @@ def create_conversation(current_user_id):
                 existing_conversation.updated_at = datetime.utcnow()
                 db.session.commit()
                 
+                # Emit WebSocket event
+                emit_new_message(socketio, existing_conversation.id, message.to_dict())
+                
                 # Send push notification for the message
                 from app.services.push_notifications import notify_new_message
                 sender_name = get_display_name(sender)
@@ -116,6 +120,10 @@ def create_conversation(current_user_id):
             db.session.add(message)
         
         db.session.commit()
+        
+        # Emit WebSocket event if message was sent
+        if initial_message:
+            emit_new_message(socketio, conversation.id, message.to_dict())
         
         # Send push notification for initial message
         if initial_message:
@@ -257,6 +265,9 @@ def send_message(current_user_id, conversation_id):
         conversation.updated_at = datetime.utcnow()
         
         db.session.commit()
+        
+        # Emit WebSocket event for real-time delivery
+        emit_new_message(socketio, conversation_id, message.to_dict())
         
         # Send push notification to the other participant
         from app.services.push_notifications import notify_new_message
