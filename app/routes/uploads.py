@@ -1,4 +1,4 @@
-"""Image upload routes for listings and profiles."""
+"""File upload routes for images, videos, documents, and audio."""
 
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 import os
@@ -14,9 +14,19 @@ logger = logging.getLogger(__name__)
 # Use the same key as Flask-JWT-Extended configuration
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
-# Allowed file extensions
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+# Allowed file extensions by category
+IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'}
+VIDEO_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm'}
+AUDIO_EXTENSIONS = {'mp3', 'wav', 'm4a', 'aac', 'ogg'}
+DOCUMENT_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx'}
+
+ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | DOCUMENT_EXTENSIONS
+
+# File size limits by category
+IMAGE_MAX_SIZE = 5 * 1024 * 1024  # 5MB
+VIDEO_MAX_SIZE = 50 * 1024 * 1024  # 50MB
+AUDIO_MAX_SIZE = 10 * 1024 * 1024  # 10MB
+DOCUMENT_MAX_SIZE = 10 * 1024 * 1024  # 10MB
 
 def token_required(f):
     @wraps(f)
@@ -40,6 +50,29 @@ def token_required(f):
         return f(current_user_id, *args, **kwargs)
     return decorated
 
+def get_file_category(extension):
+    """Determine file category from extension."""
+    extension = extension.lower()
+    if extension in IMAGE_EXTENSIONS:
+        return 'image'
+    elif extension in VIDEO_EXTENSIONS:
+        return 'video'
+    elif extension in AUDIO_EXTENSIONS:
+        return 'audio'
+    elif extension in DOCUMENT_EXTENSIONS:
+        return 'document'
+    return None
+
+def get_max_file_size(category):
+    """Get maximum file size for category."""
+    sizes = {
+        'image': IMAGE_MAX_SIZE,
+        'video': VIDEO_MAX_SIZE,
+        'audio': AUDIO_MAX_SIZE,
+        'document': DOCUMENT_MAX_SIZE
+    }
+    return sizes.get(category, IMAGE_MAX_SIZE)
+
 def allowed_file(filename):
     """Check if file extension is allowed."""
     return '.' in filename and \
@@ -55,7 +88,7 @@ def get_upload_folder():
 @uploads_bp.route('', methods=['POST'])
 @token_required
 def upload_file(current_user_id):
-    """Upload an image file."""
+    """Upload a file (image, video, audio, or document)."""
     try:
         # Log request details for debugging
         logger.info(f'Upload request from user {current_user_id}')
@@ -79,19 +112,24 @@ def upload_file(current_user_id):
         
         # Check file extension
         if not allowed_file(file.filename):
-            logger.error(f'File type not allowed: {file.filename}. Allowed: {ALLOWED_EXTENSIONS}')
-            return jsonify({'error': f'File type not allowed. Allowed types: {ALLOWED_EXTENSIONS}'}), 400
+            logger.error(f'File type not allowed: {file.filename}')
+            return jsonify({'error': f'File type not allowed. Allowed types: images, videos, audio, documents'}), 400
+        
+        # Get file category and max size
+        extension = file.filename.rsplit('.', 1)[1].lower()
+        category = get_file_category(extension)
+        max_size = get_max_file_size(category)
         
         # Check file size
         file.seek(0, 2)  # Seek to end
         file_size = file.tell()
         file.seek(0)  # Seek back to start
         
-        logger.info(f'File size: {file_size} bytes ({file_size / (1024*1024):.2f}MB)')
+        logger.info(f'File size: {file_size} bytes ({file_size / (1024*1024):.2f}MB), category: {category}')
         
-        if file_size > MAX_FILE_SIZE:
-            logger.error(f'File too large: {file_size} bytes (max: {MAX_FILE_SIZE})')
-            return jsonify({'error': f'File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB'}), 400
+        if file_size > max_size:
+            logger.error(f'File too large: {file_size} bytes (max: {max_size})')
+            return jsonify({'error': f'File too large. Maximum size for {category}: {max_size // (1024*1024)}MB'}), 400
         
         # Generate unique filename
         original_filename = secure_filename(file.filename)
@@ -105,13 +143,15 @@ def upload_file(current_user_id):
         
         logger.info(f'File saved successfully: {unique_filename}')
         
-        # Return URL
+        # Return URL and metadata
         file_url = f"/api/uploads/{unique_filename}"
         
         return jsonify({
             'message': 'File uploaded successfully',
             'url': file_url,
-            'filename': unique_filename
+            'filename': unique_filename,
+            'category': category,
+            'size': file_size
         }), 201
         
     except Exception as e:
