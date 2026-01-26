@@ -11,6 +11,12 @@ disputes_bp = Blueprint('disputes', __name__)
 # Support email for disputes
 SUPPORT_EMAIL = 'support@marketplace.com'
 
+# Statuses where disputes are allowed
+# Workers can dispute from 'assigned' onwards (creator might ghost after accepting)
+# Creators can dispute from 'in_progress' onwards (work has started)
+WORKER_DISPUTABLE_STATUSES = ['assigned', 'in_progress', 'completed', 'pending_confirmation']
+CREATOR_DISPUTABLE_STATUSES = ['in_progress', 'completed', 'pending_confirmation']
+
 
 @disputes_bp.route('/reasons', methods=['GET'])
 @token_required
@@ -69,10 +75,19 @@ def create_dispute(current_user):
     if not is_creator and not is_worker:
         return jsonify({'error': 'You are not involved in this task'}), 403
     
-    # Check task status - can only dispute in_progress, completed, or pending_confirmation tasks
-    if task.status not in ['in_progress', 'completed', 'pending_confirmation']:
+    # Check task status based on user role
+    # Workers can dispute earlier (from 'assigned') because creator might ghost them
+    # Creators can only dispute once work has started ('in_progress')
+    if is_worker:
+        allowed_statuses = WORKER_DISPUTABLE_STATUSES
+        status_message = 'assigned, in progress, or completed'
+    else:
+        allowed_statuses = CREATOR_DISPUTABLE_STATUSES
+        status_message = 'in progress or completed'
+    
+    if task.status not in allowed_statuses:
         return jsonify({
-            'error': f'Cannot dispute a task with status "{task.status}". Task must be in progress or completed.'
+            'error': f'Cannot dispute a task with status "{task.status}". Task must be {status_message}.'
         }), 400
     
     # Check if there's already an open dispute for this task by this user
