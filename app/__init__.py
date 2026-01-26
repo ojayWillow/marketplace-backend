@@ -56,17 +56,28 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     jwt_manager.init_app(app)
     
+    # Allowed origins for CORS
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8081",  # Expo dev
+        "https://marketplace-frontend-tau-seven.vercel.app",
+    ]
+    
+    # Add custom frontend URL if set
+    frontend_url = os.environ.get('FRONTEND_URL', '')
+    if frontend_url:
+        allowed_origins.append(frontend_url)
+    
+    # In development, allow all origins for easier mobile testing
+    is_development = config_name == 'development' or os.environ.get('FLASK_DEBUG') == '1'
+    socket_cors_origins = "*" if is_development else allowed_origins
+    
     # Initialize Socket.IO with CORS
     socketio.init_app(app, 
-                     cors_allowed_origins=[
-                         "http://localhost:3000",
-                         "http://127.0.0.1:3000",
-                         "http://localhost:5173",
-                         "http://127.0.0.1:5173",
-                         "http://localhost:8081",  # Expo dev
-                         "https://marketplace-frontend-tau-seven.vercel.app",
-                         os.environ.get('FRONTEND_URL', ''),
-                     ],
+                     cors_allowed_origins=socket_cors_origins,
                      async_mode='eventlet',
                      logger=True,
                      engineio_logger=False)
@@ -86,16 +97,11 @@ def create_app(config_name=None):
             print(f"Database initialization note: {e}")
     
     # CORS configuration - allow frontend origins
+    # In development, be more permissive for mobile testing
+    cors_origins = "*" if is_development else allowed_origins
+    
     CORS(app, 
-         origins=[
-             "http://localhost:3000",
-             "http://127.0.0.1:3000",
-             "http://localhost:5173",
-             "http://127.0.0.1:5173",
-             "http://localhost:8081",  # Expo dev
-             "https://marketplace-frontend-tau-seven.vercel.app",
-             os.environ.get('FRONTEND_URL', ''),  # Allow custom frontend URL
-         ],
+         origins=cors_origins,
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization", "Accept"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
