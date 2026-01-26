@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from app import db
 from app.models import Dispute, TaskRequest, User, Notification, NotificationType
-from app.middleware.auth import token_required
+from app.utils.auth import token_required
 
 disputes_bp = Blueprint('disputes', __name__)
 
@@ -69,8 +69,8 @@ def create_dispute(current_user):
     if not is_creator and not is_worker:
         return jsonify({'error': 'You are not involved in this task'}), 403
     
-    # Check task status - can only dispute in_progress or completed tasks
-    if task.status not in ['in_progress', 'completed']:
+    # Check task status - can only dispute in_progress, completed, or pending_confirmation tasks
+    if task.status not in ['in_progress', 'completed', 'pending_confirmation']:
         return jsonify({
             'error': f'Cannot dispute a task with status "{task.status}". Task must be in progress or completed.'
         }), 400
