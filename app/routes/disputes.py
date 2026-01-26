@@ -128,24 +128,18 @@ def create_dispute(current_user_id):
     # Create notification for the other party
     notification = Notification(
         user_id=filed_against_id,
-        type=NotificationType.SYSTEM,
+        type=NotificationType.TASK_DISPUTED,
         title='Dispute Filed',
         message=f'A dispute has been filed for task "{task.title}". Please review and respond.',
-        data={
-            'dispute_id': None,  # Will update after commit
-            'task_id': task_id,
-            'reason': Dispute.REASON_LABELS.get(reason, reason)
-        }
+        related_type='dispute',
+        related_id=None  # Will update after commit
     )
     db.session.add(notification)
     
     db.session.commit()
     
     # Update notification with dispute ID
-    notification.data = {
-        **notification.data,
-        'dispute_id': dispute.id
-    }
+    notification.related_id = dispute.id
     db.session.commit()
     
     return jsonify({
@@ -247,13 +241,11 @@ def respond_to_dispute(current_user_id, dispute_id):
     # Notify the filer that a response was received
     notification = Notification(
         user_id=dispute.filed_by_id,
-        type=NotificationType.SYSTEM,
+        type=NotificationType.TASK_DISPUTED,
         title='Dispute Response Received',
         message=f'The other party has responded to your dispute for task "{dispute.task.title}".',
-        data={
-            'dispute_id': dispute.id,
-            'task_id': dispute.task_id
-        }
+        related_type='dispute',
+        related_id=dispute.id
     )
     db.session.add(notification)
     
@@ -328,14 +320,11 @@ def resolve_dispute(current_user_id, dispute_id):
     for user_id in [dispute.filed_by_id, dispute.filed_against_id]:
         notification = Notification(
             user_id=user_id,
-            type=NotificationType.SYSTEM,
+            type=NotificationType.TASK_DISPUTED,
             title='Dispute Resolved',
             message=resolution_messages.get(resolution, 'Your dispute has been resolved.'),
-            data={
-                'dispute_id': dispute.id,
-                'task_id': dispute.task_id,
-                'resolution': resolution
-            }
+            related_type='dispute',
+            related_id=dispute.id
         )
         db.session.add(notification)
     
