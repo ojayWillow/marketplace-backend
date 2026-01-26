@@ -20,7 +20,7 @@ CREATOR_DISPUTABLE_STATUSES = ['in_progress', 'completed', 'pending_confirmation
 
 @disputes_bp.route('/reasons', methods=['GET'])
 @token_required
-def get_dispute_reasons(current_user):
+def get_dispute_reasons(current_user_id):
     """Get list of valid dispute reasons."""
     reasons = [
         {'value': reason, 'label': Dispute.REASON_LABELS.get(reason, reason)}
@@ -31,7 +31,7 @@ def get_dispute_reasons(current_user):
 
 @disputes_bp.route('', methods=['POST'])
 @token_required
-def create_dispute(current_user):
+def create_dispute(current_user_id):
     """Create a new dispute for a task.
     
     Body:
@@ -69,8 +69,8 @@ def create_dispute(current_user):
         return jsonify({'error': 'Task not found'}), 404
     
     # Check if user is involved in the task
-    is_creator = task.creator_id == current_user.id
-    is_worker = task.assigned_to_id == current_user.id
+    is_creator = task.creator_id == current_user_id
+    is_worker = task.assigned_to_id == current_user_id
     
     if not is_creator and not is_worker:
         return jsonify({'error': 'You are not involved in this task'}), 403
@@ -93,7 +93,7 @@ def create_dispute(current_user):
     # Check if there's already an open dispute for this task by this user
     existing_dispute = Dispute.query.filter_by(
         task_id=task_id,
-        filed_by_id=current_user.id,
+        filed_by_id=current_user_id,
         status='open'
     ).first()
     
@@ -112,7 +112,7 @@ def create_dispute(current_user):
     # Create the dispute
     dispute = Dispute(
         task_id=task_id,
-        filed_by_id=current_user.id,
+        filed_by_id=current_user_id,
         filed_against_id=filed_against_id,
         reason=reason,
         description=description.strip(),
@@ -157,15 +157,15 @@ def create_dispute(current_user):
 
 @disputes_bp.route('', methods=['GET'])
 @token_required
-def get_disputes(current_user):
+def get_disputes(current_user_id):
     """Get all disputes involving the current user."""
     status = request.args.get('status')  # Optional filter
     
     # Get disputes where user is either filer or target
     query = Dispute.query.filter(
         db.or_(
-            Dispute.filed_by_id == current_user.id,
-            Dispute.filed_against_id == current_user.id
+            Dispute.filed_by_id == current_user_id,
+            Dispute.filed_against_id == current_user_id
         )
     )
     
@@ -182,7 +182,7 @@ def get_disputes(current_user):
 
 @disputes_bp.route('/<int:dispute_id>', methods=['GET'])
 @token_required
-def get_dispute(current_user, dispute_id):
+def get_dispute(current_user_id, dispute_id):
     """Get details of a specific dispute."""
     dispute = Dispute.query.get(dispute_id)
     
@@ -190,9 +190,10 @@ def get_dispute(current_user, dispute_id):
         return jsonify({'error': 'Dispute not found'}), 404
     
     # Check if user is involved
-    if dispute.filed_by_id != current_user.id and dispute.filed_against_id != current_user.id:
+    if dispute.filed_by_id != current_user_id and dispute.filed_against_id != current_user_id:
         # Allow admins to view any dispute
-        if not current_user.is_admin:
+        current_user = User.query.get(current_user_id)
+        if not current_user or not getattr(current_user, 'is_admin', False):
             return jsonify({'error': 'You do not have access to this dispute'}), 403
     
     return jsonify({
@@ -203,7 +204,7 @@ def get_dispute(current_user, dispute_id):
 
 @disputes_bp.route('/<int:dispute_id>/respond', methods=['POST'])
 @token_required
-def respond_to_dispute(current_user, dispute_id):
+def respond_to_dispute(current_user_id, dispute_id):
     """Allow the other party to respond to a dispute.
     
     Body:
@@ -216,7 +217,7 @@ def respond_to_dispute(current_user, dispute_id):
         return jsonify({'error': 'Dispute not found'}), 404
     
     # Only the person the dispute is filed against can respond
-    if dispute.filed_against_id != current_user.id:
+    if dispute.filed_against_id != current_user_id:
         return jsonify({'error': 'Only the other party can respond to this dispute'}), 403
     
     # Can only respond to open disputes
@@ -266,23 +267,22 @@ def respond_to_dispute(current_user, dispute_id):
 
 @disputes_bp.route('/<int:dispute_id>/resolve', methods=['PUT'])
 @token_required
-def resolve_dispute(current_user, dispute_id):
+def resolve_dispute(current_user_id, dispute_id):
     """Resolve a dispute (admin only for now).
     
     Body:
         resolution: str - 'refund', 'pay_worker', 'partial', 'cancelled'
         resolution_notes: str - Explanation of the resolution
     """
-    # For now, only allow admin or the original task creator to resolve
-    # In production, this should be admin-only
     dispute = Dispute.query.get(dispute_id)
     
     if not dispute:
         return jsonify({'error': 'Dispute not found'}), 404
     
     # Check permissions - admin or task creator can resolve
-    is_admin = getattr(current_user, 'is_admin', False)
-    is_creator = dispute.task.creator_id == current_user.id
+    current_user = User.query.get(current_user_id)
+    is_admin = current_user and getattr(current_user, 'is_admin', False)
+    is_creator = dispute.task.creator_id == current_user_id
     
     # For MVP: Allow creator to resolve, but in production should be admin only
     if not is_admin and not is_creator:
@@ -305,7 +305,7 @@ def resolve_dispute(current_user, dispute_id):
     # Update dispute
     dispute.resolution = resolution
     dispute.resolution_notes = resolution_notes
-    dispute.resolved_by_id = current_user.id
+    dispute.resolved_by_id = current_user_id
     dispute.resolved_at = datetime.utcnow()
     dispute.status = 'resolved'
     
@@ -349,7 +349,7 @@ def resolve_dispute(current_user, dispute_id):
 
 @disputes_bp.route('/task/<int:task_id>', methods=['GET'])
 @token_required
-def get_task_disputes(current_user, task_id):
+def get_task_disputes(current_user_id, task_id):
     """Get all disputes for a specific task."""
     task = TaskRequest.query.get(task_id)
     
@@ -357,8 +357,9 @@ def get_task_disputes(current_user, task_id):
         return jsonify({'error': 'Task not found'}), 404
     
     # Check if user is involved in the task
-    if task.creator_id != current_user.id and task.assigned_to_id != current_user.id:
-        if not getattr(current_user, 'is_admin', False):
+    if task.creator_id != current_user_id and task.assigned_to_id != current_user_id:
+        current_user = User.query.get(current_user_id)
+        if not current_user or not getattr(current_user, 'is_admin', False):
             return jsonify({'error': 'You do not have access to this task'}), 403
     
     disputes = Dispute.query.filter_by(task_id=task_id).order_by(Dispute.created_at.desc()).all()
