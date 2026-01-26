@@ -32,11 +32,21 @@ def get_task_notifications(current_user_id):
             TaskApplication.status == 'accepted'
         ).count()
         
+        # Count disputed tasks (for both creator and worker)
+        disputed_count = TaskRequest.query.filter(
+            db.or_(
+                TaskRequest.creator_id == current_user_id,
+                TaskRequest.assigned_to_id == current_user_id
+            ),
+            TaskRequest.status == 'disputed'
+        ).count()
+        
         return jsonify({
             'pending_applications': pending_applications_count,
             'pending_confirmation': pending_confirmation_count,
             'accepted_applications': accepted_applications_count,
-            'total': pending_applications_count + pending_confirmation_count
+            'disputed': disputed_count,
+            'total': pending_applications_count + pending_confirmation_count + disputed_count
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -45,16 +55,23 @@ def get_task_notifications(current_user_id):
 @tasks_bp.route('/my', methods=['GET'])
 @token_required
 def get_my_tasks(current_user_id):
-    """Get tasks assigned to the current user (as worker), including completed ones."""
+    """Get tasks assigned to the current user (as worker), including completed and disputed ones."""
     try:
         lang = request.args.get('lang')
         
+        # Include all statuses where the worker is involved:
+        # - assigned: accepted but not started
+        # - accepted: legacy status (same as assigned)
+        # - in_progress: worker is working on it
+        # - pending_confirmation: worker marked done, waiting for creator
+        # - completed: task is done
+        # - disputed: task has an active dispute
         my_tasks = TaskRequest.query.options(
             joinedload(TaskRequest.creator),
             joinedload(TaskRequest.assigned_user)
         ).filter(
             TaskRequest.assigned_to_id == current_user_id,
-            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation', 'completed'])
+            TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation', 'completed', 'disputed'])
         ).order_by(TaskRequest.created_at.desc()).all()
         
         tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in my_tasks]
