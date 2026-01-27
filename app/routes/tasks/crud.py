@@ -296,7 +296,8 @@ def create_task():
             except ValueError:
                 return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
         
-        # Validate difficulty if provided
+        # Note: difficulty field is sent by mobile app but not stored in TaskRequest model
+        # We validate it here but don't pass it to the constructor
         difficulty = data.get('difficulty', 'medium')
         if difficulty not in ['easy', 'medium', 'hard']:
             return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
@@ -312,7 +313,6 @@ def create_task():
             budget=data.get('budget'),
             deadline=deadline,
             priority=data.get('priority', 'normal'),
-            difficulty=difficulty,
             is_urgent=data.get('is_urgent', False),
             images=data.get('images')
         )
@@ -320,7 +320,7 @@ def create_task():
         db.session.add(task)
         db.session.commit()
         
-        logger.info(f'Task created successfully: {task.id}, images: {task.images}, difficulty: {task.difficulty}')
+        logger.info(f'Task created successfully: {task.id}, images: {task.images}')
         
         return jsonify({
             'message': 'Task created successfully',
@@ -365,14 +365,16 @@ def update_task(current_user_id, task_id):
             task.budget = data['budget']
         if 'priority' in data:
             task.priority = data['priority']
-        if 'difficulty' in data:
-            if data['difficulty'] not in ['easy', 'medium', 'hard']:
-                return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
-            task.difficulty = data['difficulty']
         if 'is_urgent' in data:
             task.is_urgent = data['is_urgent']
         if 'images' in data:
             task.images = data['images']
+        
+        # Note: difficulty field is validated but not stored (TaskRequest model doesn't have this field)
+        if 'difficulty' in data:
+            if data['difficulty'] not in ['easy', 'medium', 'hard']:
+                return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
+            # Field is valid but we don't set it since the model doesn't support it
         
         if 'deadline' in data:
             if data['deadline']:
