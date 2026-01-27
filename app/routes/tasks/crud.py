@@ -302,6 +302,10 @@ def create_task():
         if difficulty not in ['easy', 'medium', 'hard']:
             return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
         
+        # Handle payment fields
+        payment_required = data.get('payment_required', False)
+        payment_status = 'pending' if payment_required else 'not_required'
+        
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
@@ -314,13 +318,15 @@ def create_task():
             deadline=deadline,
             priority=data.get('priority', 'normal'),
             is_urgent=data.get('is_urgent', False),
-            images=data.get('images')
+            images=data.get('images'),
+            payment_required=payment_required,
+            payment_status=payment_status
         )
         
         db.session.add(task)
         db.session.commit()
         
-        logger.info(f'Task created successfully: {task.id}, images: {task.images}')
+        logger.info(f'Task created successfully: {task.id}, images: {task.images}, payment_required: {task.payment_required}')
         
         return jsonify({
             'message': 'Task created successfully',
