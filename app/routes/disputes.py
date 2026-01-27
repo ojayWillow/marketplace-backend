@@ -152,16 +152,31 @@ def create_dispute(current_user_id):
 @disputes_bp.route('', methods=['GET'])
 @token_required
 def get_disputes(current_user_id):
-    """Get all disputes involving the current user."""
-    status = request.args.get('status')  # Optional filter
+    """Get disputes involving the current user, or all disputes if admin.
     
-    # Get disputes where user is either filer or target
-    query = Dispute.query.filter(
-        db.or_(
-            Dispute.filed_by_id == current_user_id,
-            Dispute.filed_against_id == current_user_id
+    Query params:
+        status: optional filter by status
+        all: if true and user is admin, return all disputes systemwide
+    """
+    status = request.args.get('status')  # Optional filter
+    show_all = request.args.get('all', 'false').lower() == 'true'
+    
+    # Check if user is admin
+    current_user = User.query.get(current_user_id)
+    is_admin = current_user and getattr(current_user, 'is_admin', False)
+    
+    # Build query
+    if show_all and is_admin:
+        # Admin: get all disputes
+        query = Dispute.query
+    else:
+        # Regular user: only disputes they're involved in
+        query = Dispute.query.filter(
+            db.or_(
+                Dispute.filed_by_id == current_user_id,
+                Dispute.filed_against_id == current_user_id
+            )
         )
-    )
     
     if status:
         query = query.filter(Dispute.status == status)
