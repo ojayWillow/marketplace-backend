@@ -3,7 +3,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime
 from app import db
-from app.models import Dispute, TaskRequest, User, Notification, NotificationType
+from app.models import Dispute, TaskRequest, User, Notification, NotificationType, Review
 from app.utils.auth import token_required
 
 disputes_bp = Blueprint('disputes', __name__)
@@ -272,10 +272,65 @@ def respond_to_dispute(current_user_id, dispute_id):
     }), 200
 
 
+def _create_dispute_review(task, guilty_user_id, reviewer_id, review_type, resolution_notes):
+    """Create a 1-star review for the guilty party after dispute resolution.
+    
+    Args:
+        task: The TaskRequest object
+        guilty_user_id: ID of the user who was found at fault
+        reviewer_id: ID of the admin/resolver creating the review
+        review_type: 'client_review' or 'worker_review'
+        resolution_notes: Notes explaining the resolution
+    """
+    # Check if there's already a review for this task from this type
+    existing_review = Review.query.filter_by(
+        task_id=task.id,
+        reviewed_user_id=guilty_user_id
+    ).first()
+    
+    if existing_review:
+        # Update existing review to 1 star
+        existing_review.rating = 1.0
+        existing_review.content = f"[Dispute Resolution] {resolution_notes or 'Resolved against this user.'}"
+        existing_review.updated_at = datetime.utcnow()
+    else:
+        # Create new 1-star review
+        review = Review(
+            rating=1.0,
+            content=f"[Dispute Resolution] {resolution_notes or 'Resolved against this user.'}",
+            reviewer_id=reviewer_id,
+            reviewed_user_id=guilty_user_id,
+            task_id=task.id,
+            review_type=review_type
+        )
+        db.session.add(review)
+
+
+def _reactivate_task(task):
+    """Reactivate a task post so creator can find a new worker.
+    
+    Args:
+        task: The TaskRequest object to reactivate
+    """
+    # Reset task to open status
+    task.status = 'open'
+    task.assigned_to_id = None
+    task.completed_at = None
+    
+    # Note: You may also want to clear any applications from the old worker
+    # or handle other cleanup
+
+
 @disputes_bp.route('/<int:dispute_id>/resolve', methods=['PUT'])
 @token_required
 def resolve_dispute(current_user_id, dispute_id):
     """Resolve a dispute (admin only for now).
+    
+    Resolution consequences:
+    - refund: Worker is at fault -> Worker gets 1★ review, task cancelled
+    - pay_worker: Creator is at fault -> Creator gets 1★ review, task completed
+    - partial: Shared fault or compromise -> No auto-review, task completed
+    - cancelled: Nobody at fault -> No review, task reactivated for new worker
     
     Body:
         resolution: str - 'refund', 'pay_worker', 'partial', 'cancelled'
@@ -286,13 +341,11 @@ def resolve_dispute(current_user_id, dispute_id):
     if not dispute:
         return jsonify({'error': 'Dispute not found'}), 404
     
-    # Check permissions - admin or task creator can resolve
+    # Check permissions - admin only (removed creator permission for production)
     current_user = User.query.get(current_user_id)
     is_admin = current_user and getattr(current_user, 'is_admin', False)
-    is_creator = dispute.task.creator_id == current_user_id
     
-    # For MVP: Allow creator to resolve, but in production should be admin only
-    if not is_admin and not is_creator:
+    if not is_admin:
         return jsonify({'error': 'Only administrators can resolve disputes'}), 403
     
     if dispute.status == 'resolved':
@@ -309,6 +362,41 @@ def resolve_dispute(current_user_id, dispute_id):
     if resolution not in valid_resolutions:
         return jsonify({'error': f'Invalid resolution. Must be one of: {valid_resolutions}'}), 400
     
+    task = dispute.task
+    
+    # Apply resolution consequences
+    if resolution == 'refund':
+        # Worker is at fault - give worker 1★ review
+        _create_dispute_review(
+            task=task,
+            guilty_user_id=task.assigned_to_id,
+            reviewer_id=current_user_id,
+            review_type='client_review',  # Creator reviewing worker
+            resolution_notes=resolution_notes
+        )
+        task.status = 'cancelled'
+        
+    elif resolution == 'pay_worker':
+        # Creator is at fault - give creator 1★ review
+        _create_dispute_review(
+            task=task,
+            guilty_user_id=task.creator_id,
+            reviewer_id=current_user_id,
+            review_type='worker_review',  # Worker reviewing creator
+            resolution_notes=resolution_notes
+        )
+        task.status = 'completed'
+        task.completed_at = datetime.utcnow()
+        
+    elif resolution == 'partial':
+        # Shared fault or compromise - no automatic review
+        task.status = 'completed'
+        task.completed_at = datetime.utcnow()
+        
+    elif resolution == 'cancelled':
+        # Nobody at fault - reactivate task for new worker
+        _reactivate_task(task)
+    
     # Update dispute
     dispute.resolution = resolution
     dispute.resolution_notes = resolution_notes
@@ -316,28 +404,33 @@ def resolve_dispute(current_user_id, dispute_id):
     dispute.resolved_at = datetime.utcnow()
     dispute.status = 'resolved'
     
-    # Update task status based on resolution
-    task = dispute.task
-    if resolution == 'cancelled':
-        task.status = 'cancelled'
-    elif resolution in ['refund', 'pay_worker', 'partial']:
-        task.status = 'completed'
-        task.completed_at = datetime.utcnow()
-    
     # Notify both parties
     resolution_messages = {
-        'refund': 'The dispute has been resolved with a full refund to the task creator.',
-        'pay_worker': 'The dispute has been resolved in favor of the worker.',
-        'partial': 'The dispute has been resolved with a partial resolution.',
-        'cancelled': 'The dispute has been resolved and the task has been cancelled.'
+        'refund': 'The dispute has been resolved with a full refund. The worker has received a 1-star review.',
+        'pay_worker': 'The dispute has been resolved in favor of the worker. The task creator has received a 1-star review.',
+        'partial': 'The dispute has been resolved with a partial/compromise solution.',
+        'cancelled': 'The dispute has been resolved. The task has been reactivated and you can find a new worker.'
     }
     
+    # Different messages for each party
     for user_id in [dispute.filed_by_id, dispute.filed_against_id]:
+        # Determine if this user is the "guilty" party for personalized messaging
+        is_creator = user_id == task.creator_id
+        
+        if resolution == 'refund' and not is_creator:
+            # Worker receiving bad news
+            message = 'The dispute has been resolved against you. A 1-star review has been added to your profile.'
+        elif resolution == 'pay_worker' and is_creator:
+            # Creator receiving bad news
+            message = 'The dispute has been resolved against you. A 1-star review has been added to your profile.'
+        else:
+            message = resolution_messages.get(resolution, 'Your dispute has been resolved.')
+        
         notification = Notification(
             user_id=user_id,
             type=NotificationType.TASK_DISPUTED,
             title='Dispute Resolved',
-            message=resolution_messages.get(resolution, 'Your dispute has been resolved.'),
+            message=message,
             related_type='dispute',
             related_id=dispute.id
         )
@@ -347,7 +440,12 @@ def resolve_dispute(current_user_id, dispute_id):
     
     return jsonify({
         'message': 'Dispute resolved successfully',
-        'dispute': dispute.to_dict()
+        'dispute': dispute.to_dict(),
+        'consequences': {
+            'review_added': resolution in ['refund', 'pay_worker'],
+            'task_reactivated': resolution == 'cancelled',
+            'task_status': task.status
+        }
     }), 200
 
 
