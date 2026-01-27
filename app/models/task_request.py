@@ -32,6 +32,17 @@ class TaskRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
+    # Payment fields
+    payment_required = db.Column(db.Boolean, default=False, nullable=False, index=True)  # Whether task requires upfront payment
+    payment_status = db.Column(db.String(20), default='not_required', nullable=False, index=True)
+    # 'not_required' - Task doesn't need payment
+    # 'pending' - Waiting for payment
+    # 'held' - Payment captured in escrow
+    # 'released' - Payment sent to worker
+    # 'refunded' - Payment returned to creator
+    # 'partially_refunded' - Partial refund processed
+    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True, index=True)  # Link to payment
+    
     # Note: Relationships are defined in User model with eager loading.
     # Use self.creator and self.assigned_user (backref names from User model)
     
@@ -107,7 +118,9 @@ class TaskRequest(db.Model):
             'is_urgent': self.is_urgent,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'payment_required': self.payment_required,
+            'payment_status': self.payment_status,
         }
     
     def __repr__(self):
