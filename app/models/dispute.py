@@ -19,7 +19,7 @@ class Dispute(db.Model):
     filed_against_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     
     # Dispute details
-    reason = db.Column(db.String(100), nullable=False)  # 'work_quality', 'no_show', 'incomplete', etc.
+    reason = db.Column(db.String(100), nullable=False)  # 'work_quality', 'no_show', 'incomplete', 'payment', 'other'
     description = db.Column(db.Text, nullable=False)
     evidence_images = db.Column(db.JSON, nullable=True)  # Array of image URLs
     
@@ -52,6 +52,7 @@ class Dispute(db.Model):
         'no_show',         # Worker/Creator didn't show up
         'incomplete',      # Work not finished
         'different_work',  # Work done is different from agreed
+        'payment',         # Payment issues
         'communication',   # Not responding, ghosting
         'safety',          # Safety concerns
         'other'            # Other issues
@@ -62,6 +63,7 @@ class Dispute(db.Model):
         'no_show': 'No Show',
         'incomplete': 'Incomplete Work',
         'different_work': 'Work Different Than Agreed',
+        'payment': 'Payment Issue',
         'communication': 'Communication Problems',
         'safety': 'Safety Concern',
         'other': 'Other Issue'
