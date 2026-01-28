@@ -30,7 +30,6 @@ def register_routes(app):
     from .notifications import notifications_bp
     from .push import push_bp
     from .disputes import disputes_bp
-    from .payments import payments_bp
 
     # Register health check at /api/health
     app.register_blueprint(health_bp, url_prefix='/api')
@@ -50,4 +49,3 @@ def register_routes(app):
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
     app.register_blueprint(push_bp, url_prefix='/api/push')
     app.register_blueprint(disputes_bp, url_prefix='/api/disputes')
-    app.register_blueprint(payments_bp, url_prefix='/api/payments')
