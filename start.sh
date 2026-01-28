@@ -12,4 +12,4 @@ sleep 2
 
 # Start gunicorn immediately
 echo "Starting gunicorn..."
-exec gunicorn wsgi:app --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT --log-level info
+exec gunicorn wsgi:app --worker-class gevent -w 1 --bind 0.0.0.0:$PORT --log-level info
