@@ -64,6 +64,7 @@ def create_app(config_name=None):
         "http://127.0.0.1:5173",
         "http://localhost:8081",  # Expo dev
         "https://marketplace-frontend-tau-seven.vercel.app",
+        "https://marketplace-backend-qmh6.onrender.com",  # Add Render backend URL for Socket.IO
     ]
     
     # Add custom frontend URL if set
@@ -86,19 +87,33 @@ def create_app(config_name=None):
     from app.socket_events import register_socket_events
     register_socket_events(socketio)
     
+    # CRITICAL FIX: Import models at module level BEFORE creating tables
+    # This ensures SQLAlchemy knows about all models when db.create_all() is called
+    from app.models import (
+        User, TaskRequest, TaskApplication, Listing, Review, 
+        Message, Conversation, Notification, Offering, 
+        Favorite, PushSubscription, Dispute
+    )
+    
     # Auto-create tables and constraints on startup
     with app.app_context():
         try:
-            # Import all models to ensure they're registered
-            from app.models import (
-                User, TaskRequest, TaskApplication, Listing, Review, 
-                Message, Conversation, Notification, Offering, 
-                Favorite, PushSubscription, Dispute
-            )
-            
-            # Create all tables
+            # Create all tables - models are now properly registered
             db.create_all()
             print("[STARTUP] Database tables created/verified successfully")
+            
+            # Verify critical tables exist
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            tables = inspector.get_table_names()
+            print(f"[STARTUP] Tables in database: {tables}")
+            
+            if 'conversations' not in tables or 'messages' not in tables:
+                print("[STARTUP] WARNING: Messages tables not created! Attempting manual creation...")
+                # Force create the tables
+                Conversation.__table__.create(db.engine, checkfirst=True)
+                Message.__table__.create(db.engine, checkfirst=True)
+                print("[STARTUP] Messages tables created manually")
             
             # Add unique constraint for task applications (prevent duplicate applications)
             try:
@@ -109,7 +124,9 @@ def create_app(config_name=None):
                 print(f"[STARTUP] Constraint note: {e}")
                 
         except Exception as e:
-            print(f"[STARTUP] Database initialization note: {e}")
+            print(f"[STARTUP] Database initialization error: {e}")
+            import traceback
+            traceback.print_exc()
     
     # CORS configuration - allow frontend origins
     # In development, be more permissive for mobile testing
