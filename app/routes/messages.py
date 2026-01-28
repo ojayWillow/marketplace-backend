@@ -7,8 +7,11 @@ from app.utils import token_required, get_display_name, send_push_safe
 from app.socket_events import emit_new_message
 from datetime import datetime
 from sqlalchemy import or_, and_
+import traceback
+import logging
 
 messages_bp = Blueprint('messages', __name__)
+logger = logging.getLogger(__name__)
 
 
 @messages_bp.route('/conversations', methods=['GET'])
@@ -28,6 +31,8 @@ def get_conversations(current_user_id):
             'total': len(conversations)
         }), 200
     except Exception as e:
+        logger.error(f"Error in get_conversations: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -143,6 +148,8 @@ def create_conversation(current_user_id):
         }), 201
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Error in create_conversation: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -164,6 +171,8 @@ def get_conversation(current_user_id, conversation_id):
             'conversation': conversation.to_dict(current_user_id)
         }), 200
     except Exception as e:
+        logger.error(f"Error in get_conversation: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -213,6 +222,8 @@ def get_messages(current_user_id, conversation_id):
         }), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Error in get_messages: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -312,6 +323,8 @@ def send_message(current_user_id, conversation_id):
         }), 201
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Error in send_message: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -342,6 +355,8 @@ def mark_message_read(current_user_id, message_id):
         }), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Error in mark_message_read: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -374,6 +389,8 @@ def mark_all_read(current_user_id, conversation_id):
         }), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Error in mark_all_read: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -382,6 +399,8 @@ def mark_all_read(current_user_id, conversation_id):
 def get_unread_count(current_user_id):
     """Get total unread message count for current user."""
     try:
+        logger.info(f"Getting unread count for user {current_user_id}")
+        
         # Get all conversations where user is a participant
         conversations = Conversation.query.filter(
             or_(
@@ -390,12 +409,23 @@ def get_unread_count(current_user_id):
             )
         ).all()
         
+        logger.info(f"Found {len(conversations)} conversations for user {current_user_id}")
+        
         total_unread = 0
         for conv in conversations:
-            total_unread += conv.get_unread_count(current_user_id)
+            try:
+                unread = conv.get_unread_count(current_user_id)
+                logger.info(f"Conversation {conv.id}: {unread} unread messages")
+                total_unread += unread
+            except Exception as conv_error:
+                logger.error(f"Error getting unread count for conversation {conv.id}: {conv_error}")
+                logger.error(traceback.format_exc())
+                # Continue with other conversations
         
         return jsonify({
             'unread_count': total_unread
         }), 200
     except Exception as e:
+        logger.error(f"Error in get_unread_count: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
