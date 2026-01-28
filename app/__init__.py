@@ -76,12 +76,14 @@ def create_app(config_name=None):
     is_development = config_name == 'development' or os.environ.get('FLASK_DEBUG') == '1'
     socket_cors_origins = "*" if is_development else allowed_origins
     
-    # Initialize Socket.IO with CORS
+    # Initialize Socket.IO with CORS and increased timeouts for mobile
     socketio.init_app(app, 
                      cors_allowed_origins=socket_cors_origins,
                      async_mode='gevent',
                      logger=True,
-                     engineio_logger=False)
+                     engineio_logger=False,
+                     ping_timeout=60,  # Increase from default 5s to 60s
+                     ping_interval=25)  # Keep at 25s (default)
     
     # Register socket events
     from app.socket_events import register_socket_events
