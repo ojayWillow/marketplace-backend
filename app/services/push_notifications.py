@@ -62,19 +62,25 @@ def send_push_notification(user_id: int, title: str, body: str,
         logger.warning(f'[PUSH] No active subscriptions for user {user_id}')
         return {'sent': 0, 'failed': 0, 'error': 'No active subscriptions'}
     
-    # Build notification payload
+    # Build notification payload - ensure all values are JSON-serializable primitives
     payload = {
-        'title': title,
-        'body': body,
-        'icon': icon or '/icons/icon-192x192.png',
+        'title': str(title) if title else '',
+        'body': str(body) if body else '',
+        'icon': str(icon) if icon else '/icons/icon-192x192.png',
         'badge': '/icons/badge-72x72.png',
-        'tag': tag,
+        'tag': str(tag) if tag else 'notification',
         'data': {
-            'url': url or '/'
+            'url': str(url) if url else '/'
         }
     }
     
-    logger.info(f'[PUSH] Payload: {json.dumps(payload)}')
+    # Try to serialize payload to catch any circular reference issues
+    try:
+        payload_json = json.dumps(payload)
+        logger.info(f'[PUSH] Payload: {payload_json}')
+    except (TypeError, ValueError, RecursionError) as e:
+        logger.error(f'[PUSH] Failed to serialize payload: {type(e).__name__}: {e}')
+        return {'sent': 0, 'failed': len(subscriptions), 'error': f'Payload serialization error: {e}'}
     
     sent_count = 0
     failed_count = 0
@@ -94,7 +100,7 @@ def send_push_notification(user_id: int, title: str, body: str,
             
             response = webpush(
                 subscription_info=subscription_info,
-                data=json.dumps(payload),
+                data=payload_json,  # Use pre-serialized payload
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=VAPID_CLAIMS
             )
@@ -113,11 +119,21 @@ def send_push_notification(user_id: int, title: str, body: str,
             if e.response and e.response.status_code in [404, 410]:
                 logger.warning(f'[PUSH] Deactivating invalid subscription {subscription.id}')
                 subscription.is_active = False
-                db.session.commit()
+                try:
+                    db.session.commit()
+                except Exception as commit_error:
+                    logger.error(f'[PUSH] Failed to deactivate subscription: {commit_error}')
+                    db.session.rollback()
                 
+        except (RecursionError, TypeError, ValueError) as e:
+            failed_count += 1
+            logger.error(f'[PUSH] Serialization error for subscription {subscription.id}: {type(e).__name__}: {e}')
+            
         except Exception as e:
             failed_count += 1
             logger.error(f'[PUSH] Unexpected error for subscription {subscription.id}: {type(e).__name__}: {e}')
+            import traceback
+            logger.error(traceback.format_exc())
     
     result = {'sent': sent_count, 'failed': failed_count}
     logger.info(f'[PUSH] === Completed: {result} ===')
