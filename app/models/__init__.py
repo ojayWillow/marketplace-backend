@@ -14,7 +14,6 @@ from .notification import Notification, NotificationType
 from .password_reset import PasswordResetToken
 from .push_subscription import PushSubscription
 from .dispute import Dispute
-from .transaction import Transaction
 
 __all__ = [
     'User', 
@@ -32,6 +31,5 @@ __all__ = [
     'NotificationType',
     'PasswordResetToken',
     'PushSubscription',
-    'Dispute',
-    'Transaction'
+    'Dispute'
 ]
