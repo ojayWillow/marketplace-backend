@@ -115,6 +115,28 @@ def create_app(config_name=None):
                 Message.__table__.create(db.engine, checkfirst=True)
                 print("[STARTUP] Messages tables created manually")
             
+            # MIGRATION: Add attachment columns to messages table if they don't exist
+            try:
+                columns = [col['name'] for col in inspector.get_columns('messages')]
+                print(f"[STARTUP] Messages table columns: {columns}")
+                
+                if 'attachment_url' not in columns:
+                    print("[STARTUP] Adding attachment_url column to messages table...")
+                    db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_url TEXT'))
+                    db.session.commit()
+                    print("[STARTUP] ✓ Added attachment_url column")
+                
+                if 'attachment_type' not in columns:
+                    print("[STARTUP] Adding attachment_type column to messages table...")
+                    db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_type VARCHAR(20)'))
+                    db.session.commit()
+                    print("[STARTUP] ✓ Added attachment_type column")
+                    
+            except Exception as migration_error:
+                print(f"[STARTUP] Migration error: {migration_error}")
+                import traceback
+                traceback.print_exc()
+            
             # Add unique constraint for task applications (prevent duplicate applications)
             try:
                 db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS unique_task_application ON task_applications (task_id, applicant_id)'))
