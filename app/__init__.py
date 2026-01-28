@@ -78,7 +78,7 @@ def create_app(config_name=None):
     # Initialize Socket.IO with CORS
     socketio.init_app(app, 
                      cors_allowed_origins=socket_cors_origins,
-                     async_mode='eventlet',
+                     async_mode='gevent',
                      logger=True,
                      engineio_logger=False)
     
