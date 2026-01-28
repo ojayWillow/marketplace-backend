@@ -89,12 +89,27 @@ def create_app(config_name=None):
     # Auto-create tables and constraints on startup
     with app.app_context():
         try:
+            # Import all models to ensure they're registered
+            from app.models import (
+                User, TaskRequest, TaskApplication, Listing, Review, 
+                Message, Conversation, Notification, Offering, 
+                Favorite, PushSubscription, Dispute
+            )
+            
+            # Create all tables
             db.create_all()
+            print("[STARTUP] Database tables created/verified successfully")
+            
             # Add unique constraint for task applications (prevent duplicate applications)
-            db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS unique_task_application ON task_applications (task_id, applicant_id)'))
-            db.session.commit()
+            try:
+                db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS unique_task_application ON task_applications (task_id, applicant_id)'))
+                db.session.commit()
+                print("[STARTUP] Unique constraints created successfully")
+            except Exception as e:
+                print(f"[STARTUP] Constraint note: {e}")
+                
         except Exception as e:
-            print(f"Database initialization note: {e}")
+            print(f"[STARTUP] Database initialization note: {e}")
     
     # CORS configuration - allow frontend origins
     # In development, be more permissive for mobile testing
@@ -159,6 +174,7 @@ def create_app(config_name=None):
     try:
         from app.routes import register_routes
         register_routes(app)
+        print("[STARTUP] Routes registered successfully")
     except Exception as e:
         print(f"ERROR registering routes: {type(e).__name__}: {e}")
         import traceback
