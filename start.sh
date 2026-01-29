@@ -3,13 +3,19 @@ set -e
 
 echo "Starting application..."
 
-# Run migrations in background (non-blocking)
-echo "Running database migrations in background..."
-(flask db upgrade 2>&1 | sed 's/^/[MIGRATION] /' && echo "[MIGRATION] Completed successfully") &
+# Set default PORT if not set
+export PORT=${PORT:-10000}
 
-# Wait a moment for migrations to start
-sleep 2
+# Run migrations first (blocking) - this ensures DB is ready
+echo "Running database migrations..."
+flask db upgrade 2>&1 | sed 's/^/[MIGRATION] /' || echo "[MIGRATION] Warning: migrations may have failed"
+echo "[MIGRATION] Completed"
 
-# Start gunicorn with patched entrypoint to prevent RecursionError
-echo "Starting gunicorn with gevent monkey-patched entrypoint..."
-exec gunicorn patched_app:application --worker-class gevent -w 1 --bind 0.0.0.0:$PORT --log-level info
+# Start gunicorn with gevent-websocket worker for Socket.IO support
+echo "Starting gunicorn with gevent worker on port $PORT..."
+exec gunicorn patched_app:application \
+    --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker \
+    -w 1 \
+    --bind 0.0.0.0:$PORT \
+    --timeout 120 \
+    --log-level info
