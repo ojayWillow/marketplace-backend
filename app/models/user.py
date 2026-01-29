@@ -32,6 +32,10 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)  # Track user activity
     
+    # NEW: Presence tracking fields
+    is_online = db.Column(db.Boolean, default=False, nullable=False)  # Real-time Socket.IO connection status
+    socket_id = db.Column(db.String(100), nullable=True)  # Current Socket.IO session ID
+    
     # Helper-specific fields (all nullable for SQLite compatibility)
     is_helper = db.Column(db.Boolean, default=False, nullable=True)  # User is available to help
     skills = db.Column(db.Text, nullable=True)  # Comma-separated list of skills
@@ -76,35 +80,48 @@ class User(db.Model):
     
     def get_online_status(self):
         """
-        Get user's online status based on last_seen.
-        Returns: 'online', 'recently', or 'inactive'
+        Get user's online status based on is_online flag and last_seen.
+        Returns: 'online', 'recently', or 'offline'
+        
+        Priority:
+        1. If is_online=True -> 'online' (has active Socket.IO connection)
+        2. If last_seen < 5 min -> 'online' (just disconnected, consider online)
+        3. If last_seen < 30 min -> 'recently' (recently active)
+        4. Else -> 'offline'
         """
+        # Priority 1: Real-time Socket.IO connection
+        if self.is_online:
+            return 'online'
+        
+        # No last_seen data
         if not self.last_seen:
-            return 'inactive'
+            return 'offline'
         
         now = datetime.utcnow()
         time_diff = now - self.last_seen
         
-        # Online: active in last 5 minutes
+        # Priority 2: Just disconnected (< 5 minutes)
         if time_diff < timedelta(minutes=5):
             return 'online'
         
-        # Recently: active in last 30 minutes
+        # Priority 3: Recently active (< 30 minutes)
         if time_diff < timedelta(minutes=30):
             return 'recently'
         
-        # Inactive: not seen for 3+ days
-        if time_diff > timedelta(days=3):
-            return 'inactive'
-        
-        # Default: recently (between 30 min and 3 days)
-        return 'recently'
+        # Default: Offline
+        return 'offline'
     
     def get_last_seen_display(self):
         """
         Get human-readable last seen text.
         Returns string like "5 minutes ago", "2 hours ago", "3 days ago"
+        
+        Returns None if user is currently online (is_online=True)
         """
+        # Don't show "last seen" if user is currently online
+        if self.is_online:
+            return None
+        
         if not self.last_seen:
             return None
         
@@ -156,6 +173,7 @@ class User(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
+            'is_online': self.is_online,  # NEW: Include real-time online status
             'online_status': self.get_online_status(),
             'last_seen_display': self.get_last_seen_display()
         }
@@ -182,6 +200,7 @@ class User(db.Model):
             'rating': self.rating,
             'review_count': self.review_count,
             'created_at': self.created_at.isoformat(),
+            'is_online': self.is_online,  # NEW: Include real-time online status
             'online_status': self.get_online_status(),
             'last_seen_display': self.get_last_seen_display()
         }
