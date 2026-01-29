@@ -6,21 +6,15 @@ import jwt
 import os
 from app.models import Conversation, Message, User
 from app import db
-from app.services.redis_client import (
-    set_user_online, 
-    set_user_offline, 
-    is_user_online,
-    refresh_user_online
-)
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
-# Fallback in-memory storage (used when Redis unavailable)
-user_sockets = {}
+# Consider user online if seen in last 2 minutes
+ONLINE_THRESHOLD_MINUTES = 2
 
 def get_user_from_token(token):
     """Extract user ID from JWT token."""
@@ -32,6 +26,13 @@ def get_user_from_token(token):
     except Exception as e:
         logger.error(f"Token decode error: {e}")
         return None
+
+def is_user_online(user):
+    """Check if user is online based on last_seen timestamp."""
+    if not user or not user.last_seen:
+        return False
+    threshold = datetime.utcnow() - timedelta(minutes=ONLINE_THRESHOLD_MINUTES)
+    return user.last_seen > threshold
 
 def register_socket_events(socketio):
     """Register all Socket.IO event handlers."""
@@ -62,14 +63,7 @@ def register_socket_events(socketio):
                 user.update_last_seen()
                 db.session.commit()
             
-            # Store online status in Redis (shared across workers)
-            redis_success = set_user_online(user_id, request.sid)
-            
-            # Fallback to in-memory if Redis unavailable
-            if not redis_success:
-                user_sockets[user_id] = request.sid
-            
-            logger.info(f'User {user_id} connected: {request.sid} (Redis: {redis_success})')
+            logger.info(f'User {user_id} connected: {request.sid}')
             
             # Emit to the connecting user
             emit('connected', {'user_id': user_id})
@@ -90,36 +84,9 @@ def register_socket_events(socketio):
     @socketio.on('disconnect')
     def handle_disconnect():
         """Handle client disconnection."""
-        try:
-            # Try Redis first
-            user_id = set_user_offline(socket_id=request.sid)
-            
-            # Fallback to in-memory lookup
-            if not user_id:
-                for uid, sid in list(user_sockets.items()):
-                    if sid == request.sid:
-                        user_id = uid
-                        del user_sockets[uid]
-                        break
-            
-            if user_id:
-                # Update last_seen on disconnect
-                user = User.query.get(user_id)
-                if user:
-                    user.update_last_seen()
-                    db.session.commit()
-                
-                logger.info(f'User {user_id} disconnected: {request.sid}')
-                
-                # Broadcast offline status to all connected users
-                socketio.emit('user_status_changed', {
-                    'user_id': user_id,
-                    'status': 'offline',
-                    'last_seen': datetime.utcnow().isoformat()
-                })
-                
-        except Exception as e:
-            logger.error(f'Disconnect error: {e}')
+        # Note: We can't easily track which user disconnected without Redis
+        # But last_seen will naturally become stale, showing them as offline
+        pass
     
     @socketio.on('join_conversation')
     def handle_join_conversation(data):
@@ -137,8 +104,11 @@ def register_socket_events(socketio):
                 emit('error', {'message': 'Invalid token'})
                 return
             
-            # Refresh online status on activity
-            refresh_user_online(user_id)
+            # Update last_seen on activity
+            user = User.query.get(user_id)
+            if user:
+                user.update_last_seen()
+                db.session.commit()
             
             # Verify user is part of conversation
             conversation = Conversation.query.get(conversation_id)
@@ -193,8 +163,11 @@ def register_socket_events(socketio):
             if not user_id:
                 return
             
-            # Refresh online status on activity
-            refresh_user_online(user_id)
+            # Update last_seen on activity
+            user = User.query.get(user_id)
+            if user:
+                user.update_last_seen()
+                db.session.commit()
             
             # Broadcast to others in the conversation
             room = f'conversation_{conversation_id}'
@@ -209,7 +182,7 @@ def register_socket_events(socketio):
     
     @socketio.on('heartbeat')
     def handle_heartbeat(data):
-        """Handle heartbeat to keep user online status fresh."""
+        """Handle heartbeat to keep last_seen fresh."""
         try:
             token = data.get('token')
             if not token:
@@ -219,10 +192,7 @@ def register_socket_events(socketio):
             if not user_id:
                 return
             
-            # Refresh online status TTL
-            refresh_user_online(user_id)
-            
-            # Update last_seen in database periodically
+            # Update last_seen
             user = User.query.get(user_id)
             if user:
                 user.update_last_seen()
@@ -241,18 +211,11 @@ def register_socket_events(socketio):
             if not target_user_id:
                 return
             
-            # Check Redis first (accurate across workers)
-            online = is_user_online(target_user_id)
-            
-            # Fallback to in-memory check
-            if not online:
-                online = target_user_id in user_sockets
-            
-            # Get last_seen from database
+            # Check database last_seen
             user = User.query.get(target_user_id)
-            last_seen = None
-            if user and user.last_seen:
-                last_seen = user.last_seen.isoformat()
+            
+            online = is_user_online(user)
+            last_seen = user.last_seen.isoformat() if user and user.last_seen else None
             
             emit('user_status', {
                 'user_id': target_user_id,
