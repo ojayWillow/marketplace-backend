@@ -19,8 +19,3 @@ application = create_app()
 
 # For compatibility, also expose as 'app'
 app = application
-
-# CRITICAL: Wrap the Flask app with SocketIO's WSGI middleware
-# This ensures Socket.IO connections are properly handled by gunicorn + gevent
-# Without this, Socket.IO polling/websocket requests timeout
-wsgi_app = socketio.WSGIApp(socketio, application)
