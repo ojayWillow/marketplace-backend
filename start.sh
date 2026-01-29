@@ -12,9 +12,10 @@ flask db upgrade 2>&1 | sed 's/^/[MIGRATION] /' || echo "[MIGRATION] Warning: mi
 echo "[MIGRATION] Completed"
 
 # Start gunicorn with gevent worker for async support
-# Socket.IO works with basic gevent worker
+# CRITICAL: Use wsgi_app which wraps Flask app with SocketIO middleware
+# This ensures Socket.IO connections (polling + websocket) work correctly
 echo "Starting gunicorn on port $PORT..."
-exec gunicorn patched_app:application \
+exec gunicorn patched_app:wsgi_app \
     --worker-class gevent \
     -w 1 \
     --bind 0.0.0.0:$PORT \
