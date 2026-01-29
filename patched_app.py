@@ -15,8 +15,12 @@ monkey.patch_all()
 from app import create_app, socketio
 
 # Create the application instance
-# Gunicorn will call this as: patched_app:application
 application = create_app()
 
 # For compatibility, also expose as 'app'
 app = application
+
+# CRITICAL: Wrap the Flask app with SocketIO's WSGI middleware
+# This ensures Socket.IO connections are properly handled by gunicorn + gevent
+# Without this, Socket.IO polling/websocket requests timeout
+wsgi_app = socketio.WSGIApp(socketio, application)
