@@ -6,6 +6,12 @@ import jwt
 import os
 from app.models import Conversation, Message, User
 from app import db
+from app.services.redis_client import (
+    set_user_online, 
+    set_user_offline, 
+    is_user_online,
+    refresh_user_online
+)
 import logging
 from datetime import datetime
 
@@ -13,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
-# Store user -> socket_id mapping
+# Fallback in-memory storage (used when Redis unavailable)
 user_sockets = {}
 
 def get_user_from_token(token):
@@ -50,21 +56,25 @@ def register_socket_events(socketio):
                 logger.warning('Socket connection with invalid token')
                 return False
             
-            # Update user last_seen and store socket ID
+            # Update user last_seen in database
             user = User.query.get(user_id)
             if user:
                 user.update_last_seen()
                 db.session.commit()
             
-            user_sockets[user_id] = request.sid
+            # Store online status in Redis (shared across workers)
+            redis_success = set_user_online(user_id, request.sid)
             
-            logger.info(f'User {user_id} connected: {request.sid}')
+            # Fallback to in-memory if Redis unavailable
+            if not redis_success:
+                user_sockets[user_id] = request.sid
+            
+            logger.info(f'User {user_id} connected: {request.sid} (Redis: {redis_success})')
             
             # Emit to the connecting user
             emit('connected', {'user_id': user_id})
             
             # Broadcast online status to all other connected users
-            # Use emit() with broadcast=True and include_self=False
             emit('user_status_changed', {
                 'user_id': user_id,
                 'status': 'online',
@@ -81,13 +91,16 @@ def register_socket_events(socketio):
     def handle_disconnect():
         """Handle client disconnection."""
         try:
-            # Find and remove user from socket mapping
-            user_id = None
-            for uid, sid in list(user_sockets.items()):
-                if sid == request.sid:
-                    user_id = uid
-                    del user_sockets[uid]
-                    break
+            # Try Redis first
+            user_id = set_user_offline(socket_id=request.sid)
+            
+            # Fallback to in-memory lookup
+            if not user_id:
+                for uid, sid in list(user_sockets.items()):
+                    if sid == request.sid:
+                        user_id = uid
+                        del user_sockets[uid]
+                        break
             
             if user_id:
                 # Update last_seen on disconnect
@@ -99,7 +112,6 @@ def register_socket_events(socketio):
                 logger.info(f'User {user_id} disconnected: {request.sid}')
                 
                 # Broadcast offline status to all connected users
-                # socketio.emit() broadcasts by default (no broadcast param needed)
                 socketio.emit('user_status_changed', {
                     'user_id': user_id,
                     'status': 'offline',
@@ -124,6 +136,9 @@ def register_socket_events(socketio):
             if not user_id:
                 emit('error', {'message': 'Invalid token'})
                 return
+            
+            # Refresh online status on activity
+            refresh_user_online(user_id)
             
             # Verify user is part of conversation
             conversation = Conversation.query.get(conversation_id)
@@ -178,6 +193,9 @@ def register_socket_events(socketio):
             if not user_id:
                 return
             
+            # Refresh online status on activity
+            refresh_user_online(user_id)
+            
             # Broadcast to others in the conversation
             room = f'conversation_{conversation_id}'
             emit('user_typing', {
@@ -189,6 +207,32 @@ def register_socket_events(socketio):
         except Exception as e:
             logger.error(f'Typing error: {e}')
     
+    @socketio.on('heartbeat')
+    def handle_heartbeat(data):
+        """Handle heartbeat to keep user online status fresh."""
+        try:
+            token = data.get('token')
+            if not token:
+                return
+            
+            user_id = get_user_from_token(token)
+            if not user_id:
+                return
+            
+            # Refresh online status TTL
+            refresh_user_online(user_id)
+            
+            # Update last_seen in database periodically
+            user = User.query.get(user_id)
+            if user:
+                user.update_last_seen()
+                db.session.commit()
+            
+            emit('heartbeat_ack', {'status': 'ok'})
+            
+        except Exception as e:
+            logger.error(f'Heartbeat error: {e}')
+    
     @socketio.on('get_user_status')
     def handle_get_user_status(data):
         """Get online status for a specific user."""
@@ -197,8 +241,12 @@ def register_socket_events(socketio):
             if not target_user_id:
                 return
             
-            # Check if user is currently connected
-            is_online = target_user_id in user_sockets
+            # Check Redis first (accurate across workers)
+            online = is_user_online(target_user_id)
+            
+            # Fallback to in-memory check
+            if not online:
+                online = target_user_id in user_sockets
             
             # Get last_seen from database
             user = User.query.get(target_user_id)
@@ -208,12 +256,13 @@ def register_socket_events(socketio):
             
             emit('user_status', {
                 'user_id': target_user_id,
-                'status': 'online' if is_online else 'offline',
+                'status': 'online' if online else 'offline',
                 'last_seen': last_seen
             })
             
         except Exception as e:
             logger.error(f'Get user status error: {e}')
+
 
 # Function to emit new message to conversation room
 def emit_new_message(socketio, conversation_id, message_dict):
