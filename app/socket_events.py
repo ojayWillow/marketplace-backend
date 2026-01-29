@@ -16,6 +16,14 @@ SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 # In-memory tracking of online users: {user_id: socket_id}
 online_users = {}
 
+
+def utc_isoformat(dt):
+    """Convert datetime to ISO format with Z suffix to indicate UTC."""
+    if dt is None:
+        return None
+    return dt.isoformat() + 'Z'
+
+
 def get_user_from_token(token):
     """Extract user ID from JWT token."""
     try:
@@ -67,7 +75,7 @@ def register_socket_events(socketio):
                 emit('connected', {
                     'user_id': user_id,
                     'status': 'online',
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': utc_isoformat(datetime.utcnow())
                 })
                 
                 # Broadcast ONLINE status to all other users
@@ -78,7 +86,7 @@ def register_socket_events(socketio):
                     'online_status': 'online',
                     'status': 'online',  # Frontend expects this field
                     'last_seen': None,  # Don't show "last seen" when online
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': utc_isoformat(datetime.utcnow())
                 }
                 
                 emit('user_presence', status_data, broadcast=True, include_self=False)
@@ -118,7 +126,6 @@ def register_socket_events(socketio):
                     del online_users[user_id]
                 
                 last_seen_display = user.get_last_seen_display()
-                last_seen_iso = user.last_seen.isoformat() if user.last_seen else None
                 
                 logger.info(f'❌ User {user_id} ({user.username}) DISCONNECTED: {request.sid}')
                 
@@ -129,9 +136,9 @@ def register_socket_events(socketio):
                     'is_online': False,
                     'online_status': 'offline',
                     'status': 'offline',  # Frontend expects this field
-                    'last_seen': last_seen_iso,
+                    'last_seen': utc_isoformat(user.last_seen),
                     'last_seen_display': last_seen_display,
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': utc_isoformat(datetime.utcnow())
                 }
                 
                 emit('user_presence', status_data, broadcast=True)
@@ -252,7 +259,7 @@ def register_socket_events(socketio):
                 # Don't change is_online here - it's managed by connect/disconnect
                 db.session.commit()
             
-            emit('heartbeat_ack', {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
+            emit('heartbeat_ack', {'status': 'ok', 'timestamp': utc_isoformat(datetime.utcnow())})
             
         except Exception as e:
             logger.error(f'Heartbeat error: {e}', exc_info=True)
@@ -274,7 +281,7 @@ def register_socket_events(socketio):
                         'is_online': user.is_online,
                         'online_status': user.get_online_status(),
                         'status': 'online' if user.is_online else 'offline',
-                        'last_seen': user.last_seen.isoformat() if user.last_seen else None,
+                        'last_seen': utc_isoformat(user.last_seen),
                         'last_seen_display': user.get_last_seen_display()
                     })
             
@@ -304,7 +311,7 @@ def register_socket_events(socketio):
             emit('user_status', {
                 'user_id': user.id,
                 'status': 'online' if user.is_online else 'offline',
-                'last_seen': user.last_seen.isoformat() if user.last_seen else None
+                'last_seen': utc_isoformat(user.last_seen)
             })
             
             logger.info(f'Sent user_status for user {user_id}: {"online" if user.is_online else "offline"}')
