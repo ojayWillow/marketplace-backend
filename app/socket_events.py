@@ -71,13 +71,18 @@ def register_socket_events(socketio):
                 })
                 
                 # Broadcast ONLINE status to all other users
-                emit('user_presence', {
+                # Emit both event names for compatibility
+                status_data = {
                     'user_id': user_id,
                     'is_online': True,
                     'online_status': 'online',
+                    'status': 'online',  # Frontend expects this field
                     'last_seen': None,  # Don't show "last seen" when online
                     'timestamp': datetime.utcnow().isoformat()
-                }, broadcast=True, include_self=False)
+                }
+                
+                emit('user_presence', status_data, broadcast=True, include_self=False)
+                emit('user_status_changed', status_data, broadcast=True, include_self=False)
                 
             return True
             
@@ -113,18 +118,24 @@ def register_socket_events(socketio):
                     del online_users[user_id]
                 
                 last_seen_display = user.get_last_seen_display()
+                last_seen_iso = user.last_seen.isoformat() if user.last_seen else None
                 
                 logger.info(f'❌ User {user_id} ({user.username}) DISCONNECTED: {request.sid}')
                 
                 # Broadcast OFFLINE status to all users
-                emit('user_presence', {
+                # Emit both event names for compatibility
+                status_data = {
                     'user_id': user_id,
                     'is_online': False,
                     'online_status': 'offline',
-                    'last_seen': user.last_seen.isoformat() if user.last_seen else None,
+                    'status': 'offline',  # Frontend expects this field
+                    'last_seen': last_seen_iso,
                     'last_seen_display': last_seen_display,
                     'timestamp': datetime.utcnow().isoformat()
-                }, broadcast=True)
+                }
+                
+                emit('user_presence', status_data, broadcast=True)
+                emit('user_status_changed', status_data, broadcast=True)
                 
         except Exception as e:
             logger.error(f'Disconnect error: {e}', exc_info=True)
@@ -248,7 +259,7 @@ def register_socket_events(socketio):
     
     @socketio.on('get_presence')
     def handle_get_presence(data):
-        """Get online status for specific users."""
+        """Get online status for specific users (legacy event name)."""
         try:
             user_ids = data.get('user_ids', [])
             if not isinstance(user_ids, list):
@@ -262,6 +273,7 @@ def register_socket_events(socketio):
                         'user_id': user.id,
                         'is_online': user.is_online,
                         'online_status': user.get_online_status(),
+                        'status': 'online' if user.is_online else 'offline',
                         'last_seen': user.last_seen.isoformat() if user.last_seen else None,
                         'last_seen_display': user.get_last_seen_display()
                     })
@@ -270,6 +282,35 @@ def register_socket_events(socketio):
             
         except Exception as e:
             logger.error(f'Get presence error: {e}', exc_info=True)
+    
+    @socketio.on('get_user_status')
+    def handle_get_user_status(data):
+        """Get online status for a single user (frontend expected event name)."""
+        try:
+            user_id = data.get('user_id')
+            if not user_id:
+                return
+            
+            user = User.query.get(user_id)
+            if not user:
+                emit('user_status', {
+                    'user_id': user_id,
+                    'status': 'offline',
+                    'last_seen': None
+                })
+                return
+            
+            # Emit in format frontend expects
+            emit('user_status', {
+                'user_id': user.id,
+                'status': 'online' if user.is_online else 'offline',
+                'last_seen': user.last_seen.isoformat() if user.last_seen else None
+            })
+            
+            logger.info(f'Sent user_status for user {user_id}: {"online" if user.is_online else "offline"}')
+            
+        except Exception as e:
+            logger.error(f'Get user status error: {e}', exc_info=True)
 
 
 # Function to emit new message to conversation room
