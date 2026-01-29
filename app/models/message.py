@@ -4,6 +4,13 @@ from datetime import datetime
 from app import db
 
 
+def utc_isoformat(dt):
+    """Convert datetime to ISO format with Z suffix to indicate UTC."""
+    if dt is None:
+        return None
+    return dt.isoformat() + 'Z'
+
+
 class Conversation(db.Model):
     """Conversation model representing a chat between two users."""
     
@@ -74,8 +81,8 @@ class Conversation(db.Model):
             'other_participant': other_participant,
             'unread_count': unread_count,
             'last_message': last_message.to_dict() if last_message else None,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            'created_at': utc_isoformat(self.created_at),
+            'updated_at': utc_isoformat(self.updated_at)
         }
     
     def __repr__(self):
@@ -126,7 +133,7 @@ class Message(db.Model):
             'is_read': self.is_read,
             'attachment_url': self.attachment_url,
             'attachment_type': self.attachment_type,
-            'created_at': self.created_at.isoformat()
+            'created_at': utc_isoformat(self.created_at)
         }
     
     def __repr__(self):
