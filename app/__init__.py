@@ -80,8 +80,9 @@ def create_app(config_name=None):
     # The mobile app connects FROM the Railway URL, so we need to allow it
     socket_cors_origins = "*" if is_development else allowed_origins
     
-    # Initialize Socket.IO with polling transport only
-    # (WebSocket requires gevent-websocket which isn't installed)
+    # Initialize Socket.IO with gevent async mode
+    # Supports both polling and websocket transports
+    # Client connects via polling first, then upgrades to websocket for better performance
     socketio.init_app(app, 
                      cors_allowed_origins=socket_cors_origins,
                      async_mode='gevent',
@@ -89,7 +90,7 @@ def create_app(config_name=None):
                      engineio_logger=False,
                      ping_timeout=60,
                      ping_interval=25,
-                     allow_upgrades=False)  # Force polling only, no WebSocket upgrade
+                     allow_upgrades=True)  # Allow upgrade from polling to websocket
     
     # Register socket events
     from app.socket_events import register_socket_events
