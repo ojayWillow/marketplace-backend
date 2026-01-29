@@ -69,6 +69,19 @@ class Dispute(db.Model):
         'other': 'Other Issue'
     }
     
+    def _get_user_display_name(self, user):
+        """Get display name for a user, handling None values properly."""
+        if not user:
+            return None
+        
+        # Handle None values in first_name/last_name (Python f-strings convert None to 'None')
+        first = user.first_name or ''
+        last = user.last_name or ''
+        full_name = f"{first} {last}".strip()
+        
+        # Return full name if available, otherwise username
+        return full_name if full_name else user.username
+    
     def to_dict(self):
         """Convert dispute to dictionary."""
         from app.models import User
@@ -77,22 +90,14 @@ class Dispute(db.Model):
         filed_by_user = User.query.get(self.filed_by_id)
         filed_against_user = User.query.get(self.filed_against_id)
         
-        filed_by_name = None
-        if filed_by_user:
-            filed_by_name = f"{filed_by_user.first_name} {filed_by_user.last_name}".strip() or filed_by_user.username
-            
-        filed_against_name = None
-        if filed_against_user:
-            filed_against_name = f"{filed_against_user.first_name} {filed_against_user.last_name}".strip() or filed_against_user.username
-        
         return {
             'id': self.id,
             'task_id': self.task_id,
             'task_title': self.task.title if self.task else None,
             'filed_by_id': self.filed_by_id,
-            'filed_by_name': filed_by_name,
+            'filed_by_name': self._get_user_display_name(filed_by_user),
             'filed_against_id': self.filed_against_id,
-            'filed_against_name': filed_against_name,
+            'filed_against_name': self._get_user_display_name(filed_against_user),
             'reason': self.reason,
             'reason_label': self.REASON_LABELS.get(self.reason, self.reason),
             'description': self.description,
