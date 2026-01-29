@@ -4,9 +4,10 @@ from flask_socketio import emit, join_room, leave_room
 from flask import request
 import jwt
 import os
-from app.models import Conversation, Message
+from app.models import Conversation, Message, User
 from app import db
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +50,26 @@ def register_socket_events(socketio):
                 logger.warning('Socket connection with invalid token')
                 return False
             
-            # Store socket ID for this user
+            # Update user last_seen and store socket ID
+            user = User.query.get(user_id)
+            if user:
+                user.update_last_seen()
+                db.session.commit()
+            
             user_sockets[user_id] = request.sid
             
             logger.info(f'User {user_id} connected: {request.sid}')
+            
+            # Emit to the connecting user
             emit('connected', {'user_id': user_id})
+            
+            # Broadcast online status to all connected users
+            socketio.emit('user_status_changed', {
+                'user_id': user_id,
+                'status': 'online',
+                'last_seen': datetime.utcnow().isoformat()
+            }, broadcast=True, skip_sid=request.sid)
+            
             return True
             
         except Exception as e:
@@ -64,7 +80,7 @@ def register_socket_events(socketio):
     def handle_disconnect():
         """Handle client disconnection."""
         try:
-            # Remove user from socket mapping
+            # Find and remove user from socket mapping
             user_id = None
             for uid, sid in list(user_sockets.items()):
                 if sid == request.sid:
@@ -73,7 +89,21 @@ def register_socket_events(socketio):
                     break
             
             if user_id:
+                # Update last_seen on disconnect
+                user = User.query.get(user_id)
+                if user:
+                    user.update_last_seen()
+                    db.session.commit()
+                
                 logger.info(f'User {user_id} disconnected: {request.sid}')
+                
+                # Broadcast offline status
+                socketio.emit('user_status_changed', {
+                    'user_id': user_id,
+                    'status': 'offline',
+                    'last_seen': datetime.utcnow().isoformat()
+                }, broadcast=True)
+                
         except Exception as e:
             logger.error(f'Disconnect error: {e}')
     
