@@ -126,20 +126,18 @@ def create_dispute(current_user_id):
     task.status = 'disputed'
     
     # Create notification for the other party
+    # NOTE: We store task_id in related_id (not dispute_id) so frontend can route to /task/{id}
+    # This is more robust as task page shows full context including dispute info
     notification = Notification(
         user_id=filed_against_id,
         type=NotificationType.TASK_DISPUTED,
         title='Dispute Filed',
         message=f'A dispute has been filed for task "{task.title}". Please review and respond.',
-        related_type='dispute',
-        related_id=None  # Will update after commit
+        related_type='task',
+        related_id=task_id
     )
     db.session.add(notification)
     
-    db.session.commit()
-    
-    # Update notification with dispute ID
-    notification.related_id = dispute.id
     db.session.commit()
     
     return jsonify({
@@ -239,13 +237,14 @@ def respond_to_dispute(current_user_id, dispute_id):
     dispute.status = 'under_review'
     
     # Notify the filer that a response was received
+    # Store task_id for consistent routing to task page
     notification = Notification(
         user_id=dispute.filed_by_id,
         type=NotificationType.TASK_DISPUTED,
         title='Dispute Response Received',
         message=f'The other party has responded to your dispute for task "{dispute.task.title}".',
-        related_type='dispute',
-        related_id=dispute.id
+        related_type='task',
+        related_id=dispute.task_id
     )
     db.session.add(notification)
     
@@ -323,8 +322,8 @@ def resolve_dispute(current_user_id, dispute_id):
             type=NotificationType.TASK_DISPUTED,
             title='Dispute Resolved',
             message=resolution_messages.get(resolution, 'Your dispute has been resolved.'),
-            related_type='dispute',
-            related_id=dispute.id
+            related_type='task',
+            related_id=dispute.task_id
         )
         db.session.add(notification)
     
