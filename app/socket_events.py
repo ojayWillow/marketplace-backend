@@ -63,12 +63,13 @@ def register_socket_events(socketio):
             # Emit to the connecting user
             emit('connected', {'user_id': user_id})
             
-            # Broadcast online status to all connected users
-            socketio.emit('user_status_changed', {
+            # Broadcast online status to all other connected users
+            # Use emit() with broadcast=True and include_self=False
+            emit('user_status_changed', {
                 'user_id': user_id,
                 'status': 'online',
                 'last_seen': datetime.utcnow().isoformat()
-            }, broadcast=True, skip_sid=request.sid)
+            }, broadcast=True, include_self=False)
             
             return True
             
@@ -97,12 +98,13 @@ def register_socket_events(socketio):
                 
                 logger.info(f'User {user_id} disconnected: {request.sid}')
                 
-                # Broadcast offline status
+                # Broadcast offline status to all connected users
+                # socketio.emit() broadcasts by default (no broadcast param needed)
                 socketio.emit('user_status_changed', {
                     'user_id': user_id,
                     'status': 'offline',
                     'last_seen': datetime.utcnow().isoformat()
-                }, broadcast=True)
+                })
                 
         except Exception as e:
             logger.error(f'Disconnect error: {e}')
@@ -182,10 +184,36 @@ def register_socket_events(socketio):
                 'user_id': user_id,
                 'is_typing': is_typing,
                 'conversation_id': conversation_id
-            }, room=room, skip_sid=request.sid)
+            }, room=room, include_self=False)
             
         except Exception as e:
             logger.error(f'Typing error: {e}')
+    
+    @socketio.on('get_user_status')
+    def handle_get_user_status(data):
+        """Get online status for a specific user."""
+        try:
+            target_user_id = data.get('user_id')
+            if not target_user_id:
+                return
+            
+            # Check if user is currently connected
+            is_online = target_user_id in user_sockets
+            
+            # Get last_seen from database
+            user = User.query.get(target_user_id)
+            last_seen = None
+            if user and user.last_seen:
+                last_seen = user.last_seen.isoformat()
+            
+            emit('user_status', {
+                'user_id': target_user_id,
+                'status': 'online' if is_online else 'offline',
+                'last_seen': last_seen
+            })
+            
+        except Exception as e:
+            logger.error(f'Get user status error: {e}')
 
 # Function to emit new message to conversation room
 def emit_new_message(socketio, conversation_id, message_dict):
