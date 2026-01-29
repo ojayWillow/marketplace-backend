@@ -64,7 +64,8 @@ def create_app(config_name=None):
         "http://127.0.0.1:5173",
         "http://localhost:8081",  # Expo dev
         "https://marketplace-frontend-tau-seven.vercel.app",
-        "https://marketplace-backend-qmh6.onrender.com",  # Add Render backend URL for Socket.IO
+        "https://marketplace-backend-qmh6.onrender.com",  # Old Render backend
+        "https://marketplace-backend-production-e808.up.railway.app",  # Railway backend
     ]
     
     # Add custom frontend URL if set
@@ -74,6 +75,9 @@ def create_app(config_name=None):
     
     # In development, allow all origins for easier mobile testing
     is_development = config_name == 'development' or os.environ.get('FLASK_DEBUG') == '1'
+    
+    # Socket.IO CORS: In production, allow specific origins + Railway backend URL
+    # The mobile app connects FROM the Railway URL, so we need to allow it
     socket_cors_origins = "*" if is_development else allowed_origins
     
     # Initialize Socket.IO with polling transport only
