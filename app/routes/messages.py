@@ -14,17 +14,33 @@ messages_bp = Blueprint('messages', __name__)
 logger = logging.getLogger(__name__)
 
 
+def update_user_last_seen(user_id):
+    """Update user's last_seen timestamp."""
+    try:
+        user = User.query.get(user_id)
+        if user:
+            user.last_seen = datetime.utcnow()
+            # Don't commit here - let the calling function handle it
+    except Exception as e:
+        logger.error(f"Error updating last_seen for user {user_id}: {e}")
+
+
 @messages_bp.route('/conversations', methods=['GET'])
 @token_required
 def get_conversations(current_user_id):
     """Get all conversations for the current user."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         conversations = Conversation.query.filter(
             or_(
                 Conversation.participant_1_id == current_user_id,
                 Conversation.participant_2_id == current_user_id
             )
         ).order_by(Conversation.updated_at.desc()).all()
+        
+        db.session.commit()  # Commit last_seen update
         
         return jsonify({
             'conversations': [conv.to_dict(current_user_id) for conv in conversations],
@@ -41,6 +57,9 @@ def get_conversations(current_user_id):
 def create_conversation(current_user_id):
     """Create a new conversation or return existing one."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         data = request.get_json()
         other_user_id = data.get('user_id')
         task_id = data.get('task_id')  # Optional: link conversation to a task
@@ -99,6 +118,8 @@ def create_conversation(current_user_id):
                     message_preview=initial_message,
                     conversation_id=existing_conversation.id
                 )
+            else:
+                db.session.commit()  # Commit last_seen update
             
             return jsonify({
                 'conversation': existing_conversation.to_dict(current_user_id),
@@ -158,6 +179,9 @@ def create_conversation(current_user_id):
 def get_conversation(current_user_id, conversation_id):
     """Get a specific conversation."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         conversation = Conversation.query.get(conversation_id)
         
         if not conversation:
@@ -166,6 +190,8 @@ def get_conversation(current_user_id, conversation_id):
         # Verify user is a participant
         if current_user_id not in [conversation.participant_1_id, conversation.participant_2_id]:
             return jsonify({'error': 'Access denied'}), 403
+        
+        db.session.commit()  # Commit last_seen update
         
         return jsonify({
             'conversation': conversation.to_dict(current_user_id)
@@ -181,6 +207,9 @@ def get_conversation(current_user_id, conversation_id):
 def get_messages(current_user_id, conversation_id):
     """Get all messages in a conversation."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         conversation = Conversation.query.get(conversation_id)
         
         if not conversation:
@@ -232,6 +261,9 @@ def get_messages(current_user_id, conversation_id):
 def send_message(current_user_id, conversation_id):
     """Send a message in a conversation."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         conversation = Conversation.query.get(conversation_id)
         
         if not conversation:
@@ -333,6 +365,9 @@ def send_message(current_user_id, conversation_id):
 def mark_message_read(current_user_id, message_id):
     """Mark a message as read."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         message = Message.query.get(message_id)
         
         if not message:
@@ -365,6 +400,9 @@ def mark_message_read(current_user_id, message_id):
 def mark_all_read(current_user_id, conversation_id):
     """Mark all messages in a conversation as read."""
     try:
+        # Update last_seen on activity
+        update_user_last_seen(current_user_id)
+        
         conversation = Conversation.query.get(conversation_id)
         
         if not conversation:
