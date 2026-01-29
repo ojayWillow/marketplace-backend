@@ -10,6 +10,6 @@ echo "Running database migrations in background..."
 # Wait a moment for migrations to start
 sleep 2
 
-# Start gunicorn immediately
-echo "Starting gunicorn..."
-exec gunicorn wsgi:app --worker-class gevent -w 1 --bind 0.0.0.0:$PORT --log-level info
+# Start gunicorn with patched entrypoint to prevent RecursionError
+echo "Starting gunicorn with gevent monkey-patched entrypoint..."
+exec gunicorn patched_app:application --worker-class gevent -w 1 --bind 0.0.0.0:$PORT --log-level info
