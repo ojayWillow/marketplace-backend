@@ -11,8 +11,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY . .
 
-# Expose port
+# Make start.sh executable
+RUN chmod +x start.sh
+
+# Expose port (Railway will override with $PORT)
 EXPOSE 5000
 
-# Run the app
-CMD ["python", "wsgi.py"]
+# Run the app with Gunicorn (production-ready)
+CMD ["./start.sh"]
