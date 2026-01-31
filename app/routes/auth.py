@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
-from app.services.firebase import verify_firebase_token, normalize_phone_number
+from app.services.twilio_sms import send_verification_code, verify_code, normalize_phone_number
 from app.utils import token_required
 from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
@@ -111,30 +111,268 @@ def login():
 
 
 # ============================================================================
-# PHONE AUTHENTICATION ENDPOINTS
+# TWILIO PHONE AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@auth_bp.route('/phone/send-otp', methods=['POST'])
+def phone_send_otp():
+    """Send OTP verification code to phone number.
+    
+    Request body:
+        - phoneNumber: Phone number to send OTP to (e.g., '+37120000000')
+        
+    Returns:
+        - success: Boolean indicating if OTP was sent
+        - message: Success message or error description
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'phoneNumber' not in data:
+            return jsonify({'error': 'Phone number is required'}), 400
+        
+        phone_number = data['phoneNumber']
+        
+        # Validate phone number format
+        normalized = normalize_phone_number(phone_number)
+        if not normalized or len(normalized) < 10:
+            return jsonify({'error': 'Invalid phone number format'}), 400
+        
+        # Send OTP via Twilio
+        result = send_verification_code(phone_number)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': 'Verification code sent',
+                'phone': result['phone']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except ValueError as e:
+        current_app.logger.error(f"Twilio configuration error: {e}")
+        return jsonify({'error': 'SMS service not configured'}), 500
+    except Exception as e:
+        current_app.logger.error(f"Send OTP error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
+        return jsonify({'error': 'Failed to send verification code'}), 500
+
+
+@auth_bp.route('/phone/verify-otp', methods=['POST'])
+def phone_verify_otp():
+    """Verify OTP code and create/login user.
+    
+    Request body:
+        - phoneNumber: Phone number the OTP was sent to
+        - code: The 6-digit verification code
+        
+    Returns:
+        - access_token: JWT token for API calls
+        - user: User object
+        - is_new_user: Boolean indicating if new account was created
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'phoneNumber' not in data or 'code' not in data:
+            return jsonify({'error': 'Phone number and verification code are required'}), 400
+        
+        phone_number = data['phoneNumber']
+        code = data['code']
+        
+        # Verify OTP via Twilio
+        result = verify_code(phone_number, code)
+        
+        if not result['success']:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+        
+        # OTP verified - now find or create user
+        normalized_phone = result['phone']
+        
+        user = User.query.filter_by(phone=normalized_phone).first()
+        is_new_user = False
+        
+        if user:
+            # Existing user - update phone verification status
+            if not user.is_active:
+                return jsonify({'error': 'Account is disabled'}), 403
+            
+            user.phone_verified = True
+            user.last_seen = datetime.utcnow()
+            db.session.commit()
+            
+            current_app.logger.info(f"Phone login: existing user {user.id}")
+        else:
+            # New user - create account with phone
+            is_new_user = True
+            temp_username = generate_temp_username()
+            temp_email = f"{temp_username}@phone.tirgus.local"  # Placeholder email
+            
+            user = User(
+                username=temp_username,
+                email=temp_email,
+                phone=normalized_phone,
+                phone_verified=True,
+                is_verified=True  # Phone-verified users are considered verified
+            )
+            # Set a random password (user won't use it for phone auth)
+            user.set_password(generate_temp_password())
+            
+            db.session.add(user)
+            db.session.commit()
+            
+            current_app.logger.info(f"Phone login: new user created {user.id}")
+        
+        # Generate JWT token
+        payload = {
+            'user_id': user.id,
+            'username': user.username,
+            'exp': datetime.utcnow() + timedelta(hours=24)
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Phone verification successful',
+            'access_token': token,
+            'user': user.to_dict(),
+            'is_new_user': is_new_user
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Verify OTP error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
+        return jsonify({'error': 'Phone verification failed'}), 500
+
+
+@auth_bp.route('/phone/link-otp', methods=['POST'])
+@token_required
+def phone_link_otp(current_user_id):
+    """Link a verified phone number to existing user account.
+    
+    Requires: User must be logged in
+    
+    Request body:
+        - phoneNumber: Phone number the OTP was sent to
+        - code: The verification code
+        
+    Returns:
+        - user: Updated user object with phone_verified=true
+    """
+    try:
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if not user.is_active:
+            return jsonify({'error': 'Account is disabled'}), 403
+        
+        data = request.get_json()
+        
+        if not data or 'phoneNumber' not in data or 'code' not in data:
+            return jsonify({'error': 'Phone number and verification code are required'}), 400
+        
+        phone_number = data['phoneNumber']
+        code = data['code']
+        
+        # Verify OTP via Twilio
+        result = verify_code(phone_number, code)
+        
+        if not result['success']:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+        
+        normalized_phone = result['phone']
+        
+        # Check if this phone is already linked to another account
+        existing_user = User.query.filter_by(phone=normalized_phone).first()
+        if existing_user and existing_user.id != user.id:
+            return jsonify({
+                'error': 'This phone number is already linked to another account'
+            }), 409
+        
+        # Link phone to user account
+        user.phone = normalized_phone
+        user.phone_verified = True
+        user.is_verified = True  # Mark user as verified
+        user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        current_app.logger.info(f"Phone linked to user {user.id}: {normalized_phone}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Phone number verified and linked successfully',
+            'user': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Phone link error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
+        return jsonify({'error': 'Failed to link phone number'}), 500
+
+
+@auth_bp.route('/phone/check/<phone>', methods=['GET'])
+def phone_check(phone):
+    """Check if a phone number is already registered.
+    
+    Useful for frontend to determine whether to show "Login" or "Register" flow.
+    
+    Args:
+        phone: Phone number to check (URL parameter)
+        
+    Returns:
+        - exists: boolean indicating if phone is registered
+    """
+    try:
+        normalized_phone = normalize_phone_number(phone)
+        
+        if not normalized_phone:
+            return jsonify({'error': 'Invalid phone number'}), 400
+        
+        user = User.query.filter_by(phone=normalized_phone).first()
+        
+        return jsonify({
+            'exists': user is not None,
+            'phone': normalized_phone
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Phone check error: {str(e)}")
+        return jsonify({'error': 'Failed to check phone number'}), 500
+
+
+# ============================================================================
+# LEGACY FIREBASE ENDPOINTS (kept for backward compatibility)
 # ============================================================================
 
 @auth_bp.route('/phone/verify', methods=['POST'])
 def phone_verify():
-    """Verify Firebase phone authentication and create/login user.
+    """Legacy Firebase phone verification endpoint.
     
-    This endpoint receives a Firebase ID token after the user has completed
-    phone verification on the frontend. It:
-    1. Verifies the Firebase token
-    2. Extracts the verified phone number
-    3. Creates a new user or logs in existing user
-    4. Returns our app's JWT token
-    
-    Request body:
-        - idToken: Firebase ID token from frontend
-        - phoneNumber: Phone number (for verification, must match token)
-        
-    Returns:
-        - access_token: Our app's JWT for API calls
-        - user: User object
-        - is_new_user: Boolean indicating if this is a newly created account
+    DEPRECATED: Use /phone/send-otp and /phone/verify-otp instead.
+    This endpoint is kept for backward compatibility with older app versions.
     """
     try:
+        # Try to import Firebase (may not be configured)
+        try:
+            from app.services.firebase import verify_firebase_token, normalize_phone_number as firebase_normalize
+        except ImportError:
+            return jsonify({'error': 'Firebase authentication is not available. Use /phone/send-otp instead.'}), 501
+        
         data = request.get_json()
         
         if not data or 'idToken' not in data:
@@ -157,11 +395,11 @@ def phone_verify():
             return jsonify({'error': 'Phone number not verified in token'}), 401
         
         # Normalize phone number
-        normalized_phone = normalize_phone_number(verified_phone)
+        normalized_phone = firebase_normalize(verified_phone)
         
         # Optional: Verify provided phone matches token (extra security)
         if provided_phone:
-            normalized_provided = normalize_phone_number(provided_phone)
+            normalized_provided = firebase_normalize(provided_phone)
             if normalized_provided != normalized_phone:
                 current_app.logger.warning(
                     f"Phone mismatch: provided={normalized_provided}, token={normalized_phone}"
@@ -228,18 +466,16 @@ def phone_verify():
 @auth_bp.route('/phone/link', methods=['POST'])
 @token_required
 def phone_link(current_user_id):
-    """Link a verified phone number to an existing user account.
+    """Legacy Firebase phone link endpoint.
     
-    This is for users who registered with email and need to add phone verification.
-    
-    Request body:
-        - idToken: Firebase ID token from frontend
-        - phoneNumber: Phone number (for verification)
-        
-    Returns:
-        - user: Updated user object with phone_verified=true
+    DEPRECATED: Use /phone/send-otp and /phone/link-otp instead.
     """
     try:
+        try:
+            from app.services.firebase import verify_firebase_token, normalize_phone_number as firebase_normalize
+        except ImportError:
+            return jsonify({'error': 'Firebase authentication is not available. Use /phone/link-otp instead.'}), 501
+        
         user = User.query.get(current_user_id)
         
         if not user:
@@ -269,7 +505,7 @@ def phone_link(current_user_id):
             return jsonify({'error': 'Phone number not verified in token'}), 401
         
         # Normalize phone number
-        normalized_phone = normalize_phone_number(verified_phone)
+        normalized_phone = firebase_normalize(verified_phone)
         
         # Check if this phone is already linked to another account
         existing_user = User.query.filter_by(phone=normalized_phone).first()
@@ -298,36 +534,6 @@ def phone_link(current_user_id):
         current_app.logger.error(f"Phone link error: {str(e)}")
         current_app.logger.debug(traceback.format_exc())
         return jsonify({'error': 'Failed to link phone number'}), 500
-
-
-@auth_bp.route('/phone/check/<phone>', methods=['GET'])
-def phone_check(phone):
-    """Check if a phone number is already registered.
-    
-    Useful for frontend to determine whether to show "Login" or "Register" flow.
-    
-    Args:
-        phone: Phone number to check (URL parameter)
-        
-    Returns:
-        - exists: boolean indicating if phone is registered
-    """
-    try:
-        normalized_phone = normalize_phone_number(phone)
-        
-        if not normalized_phone:
-            return jsonify({'error': 'Invalid phone number'}), 400
-        
-        user = User.query.filter_by(phone=normalized_phone).first()
-        
-        return jsonify({
-            'exists': user is not None,
-            'phone': normalized_phone
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Phone check error: {str(e)}")
-        return jsonify({'error': 'Failed to check phone number'}), 500
 
 
 @auth_bp.route('/complete-registration', methods=['PUT'])
