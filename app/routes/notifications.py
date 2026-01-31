@@ -195,16 +195,18 @@ def delete_notification(current_user_id, notification_id):
 # ============ HELPER FUNCTIONS FOR CREATING NOTIFICATIONS ============
 
 def create_notification(user_id: int, notification_type: str, title: str, message: str, 
-                       related_type: str = None, related_id: int = None) -> Notification:
+                       related_type: str = None, related_id: int = None,
+                       data: dict = None) -> Notification:
     """Helper function to create a notification.
     
     Args:
         user_id: The ID of the user to notify
         notification_type: Type of notification (use NotificationType constants)
-        title: Short title for the notification
-        message: Detailed message
+        title: Short title for the notification (English fallback)
+        message: Detailed message (English fallback)
         related_type: Type of related entity ('task', 'application', etc.)
         related_id: ID of the related entity
+        data: Dictionary with dynamic values for i18n (task_title, applicant_name, etc.)
     
     Returns:
         The created Notification object
@@ -218,6 +220,9 @@ def create_notification(user_id: int, notification_type: str, title: str, messag
         related_id=related_id
     )
     
+    if data:
+        notification.set_data(data)
+    
     db.session.add(notification)
     return notification
 
@@ -230,7 +235,8 @@ def notify_application_accepted(applicant_id: int, task_title: str, task_id: int
         title='🎉 Application Accepted!',
         message=f'Congratulations! Your application for "{task_title}" has been accepted. You can now start working on this task.',
         related_type='task',
-        related_id=task_id
+        related_id=task_id,
+        data={'task_title': task_title}
     )
 
 
@@ -242,7 +248,8 @@ def notify_application_rejected(applicant_id: int, task_title: str, task_id: int
         title='Application Update',
         message=f'Your application for "{task_title}" was not selected. Keep applying to other tasks!',
         related_type='task',
-        related_id=task_id
+        related_id=task_id,
+        data={'task_title': task_title}
     )
 
 
@@ -254,7 +261,8 @@ def notify_new_application(creator_id: int, applicant_name: str, task_title: str
         title='New Application Received',
         message=f'{applicant_name} applied for your task "{task_title}".',
         related_type='task',
-        related_id=task_id
+        related_id=task_id,
+        data={'applicant_name': applicant_name, 'task_title': task_title}
     )
 
 
@@ -266,7 +274,8 @@ def notify_task_marked_done(creator_id: int, worker_name: str, task_title: str, 
         title='Task Marked as Done',
         message=f'{worker_name} has marked "{task_title}" as complete. Please review and confirm.',
         related_type='task',
-        related_id=task_id
+        related_id=task_id,
+        data={'worker_name': worker_name, 'task_title': task_title}
     )
 
 
@@ -278,5 +287,24 @@ def notify_task_completed(worker_id: int, task_title: str, task_id: int) -> Noti
         title='✅ Task Completed!',
         message=f'Great job! "{task_title}" has been confirmed as complete.',
         related_type='task',
-        related_id=task_id
+        related_id=task_id,
+        data={'task_title': task_title}
+    )
+
+
+def notify_task_disputed(user_id: int, task_title: str, task_id: int, is_creator: bool = False) -> Notification:
+    """Create notification when a task is disputed."""
+    if is_creator:
+        message = f'A dispute has been raised for your task "{task_title}". Our team will review it shortly.'
+    else:
+        message = f'The task "{task_title}" has been disputed. Our team will review it shortly.'
+    
+    return create_notification(
+        user_id=user_id,
+        notification_type=NotificationType.TASK_DISPUTED,
+        title='⚠️ Task Disputed',
+        message=message,
+        related_type='task',
+        related_id=task_id,
+        data={'task_title': task_title, 'is_creator': is_creator}
     )
