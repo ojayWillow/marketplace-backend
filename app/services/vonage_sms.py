@@ -1,18 +1,17 @@
 """Vonage SMS Verification Service for phone number authentication.
 
-This service handles sending and verifying OTP codes via Vonage Verify API.
+This service handles sending and verifying OTP codes via Vonage SMS API.
 Replaces Twilio due to Latvia region restrictions on trial accounts.
 """
 
 import os
 import secrets
+import requests
 from flask import current_app
-import vonage
 
 # Vonage credentials from environment variables
 VONAGE_API_KEY = os.environ.get('VONAGE_API_KEY')
 VONAGE_API_SECRET = os.environ.get('VONAGE_API_SECRET')
-VONAGE_SIGNATURE_SECRET = os.environ.get('VONAGE_SIGNATURE_SECRET')  # Optional
 
 # In-memory OTP storage (in production, use Redis with TTL)
 # Format: {phone_number: {'code': '123456', 'expires': timestamp, 'attempts': 0}}
@@ -24,14 +23,6 @@ MAX_VERIFY_ATTEMPTS = 3
 _otp_attempts = {}  # phone -> {'count': int, 'first_attempt': timestamp}
 MAX_OTP_REQUESTS_PER_HOUR = 5
 OTP_COOLDOWN_SECONDS = 60  # Minimum seconds between requests
-
-
-def get_vonage_client():
-    """Get Vonage client instance."""
-    if not VONAGE_API_KEY or not VONAGE_API_SECRET:
-        raise ValueError("Vonage credentials not configured. Set VONAGE_API_KEY and VONAGE_API_SECRET environment variables.")
-    
-    return vonage.Client(key=VONAGE_API_KEY, secret=VONAGE_API_SECRET)
 
 
 def normalize_phone_number(phone: str) -> str:
@@ -123,7 +114,7 @@ def generate_otp_code() -> str:
 
 
 def send_verification_code(phone: str) -> dict:
-    """Send OTP verification code to phone number via Vonage SMS.
+    """Send OTP verification code to phone number via Vonage SMS REST API.
     
     Args:
         phone: Phone number to send verification code to
@@ -146,10 +137,10 @@ def send_verification_code(phone: str) -> dict:
     if not is_allowed:
         return {'success': False, 'error': error_msg}
     
+    if not VONAGE_API_KEY or not VONAGE_API_SECRET:
+        raise ValueError("Vonage credentials not configured. Set VONAGE_API_KEY and VONAGE_API_SECRET environment variables.")
+    
     try:
-        client = get_vonage_client()
-        sms = vonage.Sms(client)
-        
         # Generate OTP code
         otp_code = generate_otp_code()
         
@@ -160,18 +151,26 @@ def send_verification_code(phone: str) -> dict:
             'attempts': 0
         }
         
-        # Send SMS via Vonage
+        # Send SMS via Vonage REST API directly
         # Remove + for Vonage (they expect format without +)
         to_number = normalized_phone.lstrip('+')
         
-        response = sms.send_message({
-            'from': 'Tirgus',  # Sender ID (alphanumeric, max 11 chars)
-            'to': to_number,
-            'text': f'Your Tirgus verification code is: {otp_code}. Valid for 5 minutes.',
-        })
+        # Use Vonage SMS API directly via requests
+        response = requests.post(
+            'https://rest.nexmo.com/sms/json',
+            data={
+                'api_key': VONAGE_API_KEY,
+                'api_secret': VONAGE_API_SECRET,
+                'from': 'Tirgus',
+                'to': to_number,
+                'text': f'Your Tirgus verification code is: {otp_code}. Valid for 5 minutes.',
+            }
+        )
+        
+        result = response.json()
         
         # Check response
-        if response['messages'][0]['status'] == '0':
+        if result.get('messages') and result['messages'][0]['status'] == '0':
             # Record the attempt for rate limiting
             record_otp_attempt(normalized_phone)
             
@@ -183,7 +182,7 @@ def send_verification_code(phone: str) -> dict:
                 'phone': normalized_phone,
             }
         else:
-            error_text = response['messages'][0].get('error-text', 'Unknown error')
+            error_text = result.get('messages', [{}])[0].get('error-text', 'Unknown error')
             current_app.logger.error(f"Vonage error sending OTP to {normalized_phone}: {error_text}")
             return {'success': False, 'error': f'Failed to send SMS: {error_text}'}
         
