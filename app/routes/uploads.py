@@ -81,8 +81,9 @@ def get_file_from_request(max_size: int):
         return None, None, None, (jsonify({'error': 'No file selected'}), 400)
     
     if not allowed_image(file.filename):
+        allowed_types = ', '.join(IMAGE_EXTENSIONS)
         return None, None, None, (jsonify({
-            'error': f'File type not allowed. Allowed: {\', \'.join(IMAGE_EXTENSIONS)}'
+            'error': f'File type not allowed. Allowed: {allowed_types}'
         }), 400)
     
     # Read file data
@@ -90,8 +91,9 @@ def get_file_from_request(max_size: int):
     
     # Check file size
     if len(file_data) > max_size:
+        max_mb = max_size // (1024 * 1024)
         return None, None, None, (jsonify({
-            'error': f'File too large. Maximum size: {max_size // (1024*1024)}MB'
+            'error': f'File too large. Maximum size: {max_mb}MB'
         }), 400)
     
     return file_data, file.filename, file.content_type, None
