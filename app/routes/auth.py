@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
-from app.services.twilio_sms import send_verification_code, verify_code, normalize_phone_number
+from app.services.vonage_sms import send_verification_code, verify_code, normalize_phone_number
 from app.utils import token_required
 from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
@@ -111,12 +111,12 @@ def login():
 
 
 # ============================================================================
-# TWILIO PHONE AUTHENTICATION ENDPOINTS
+# VONAGE PHONE AUTHENTICATION ENDPOINTS
 # ============================================================================
 
 @auth_bp.route('/phone/send-otp', methods=['POST'])
 def phone_send_otp():
-    """Send OTP verification code to phone number.
+    """Send OTP verification code to phone number via Vonage.
     
     Request body:
         - phoneNumber: Phone number to send OTP to (e.g., '+37120000000')
@@ -138,7 +138,7 @@ def phone_send_otp():
         if not normalized or len(normalized) < 10:
             return jsonify({'error': 'Invalid phone number format'}), 400
         
-        # Send OTP via Twilio
+        # Send OTP via Vonage
         result = send_verification_code(phone_number)
         
         if result['success']:
@@ -154,7 +154,7 @@ def phone_send_otp():
             }), 400
             
     except ValueError as e:
-        current_app.logger.error(f"Twilio configuration error: {e}")
+        current_app.logger.error(f"Vonage configuration error: {e}")
         return jsonify({'error': 'SMS service not configured'}), 500
     except Exception as e:
         current_app.logger.error(f"Send OTP error: {str(e)}")
@@ -184,7 +184,7 @@ def phone_verify_otp():
         phone_number = data['phoneNumber']
         code = data['code']
         
-        # Verify OTP via Twilio
+        # Verify OTP via Vonage
         result = verify_code(phone_number, code)
         
         if not result['success']:
@@ -284,7 +284,7 @@ def phone_link_otp(current_user_id):
         phone_number = data['phoneNumber']
         code = data['code']
         
-        # Verify OTP via Twilio
+        # Verify OTP via Vonage
         result = verify_code(phone_number, code)
         
         if not result['success']:
