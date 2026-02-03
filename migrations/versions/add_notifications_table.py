@@ -4,6 +4,7 @@ Revision ID: add_notifications_table
 Revises: f46fc4dc5909
 Create Date: 2026-01-12
 
+
 """
 from alembic import op
 import sqlalchemy as sa
@@ -25,6 +26,7 @@ def upgrade():
         sa.Column('type', sa.String(50), nullable=False),
         sa.Column('title', sa.String(200), nullable=False),
         sa.Column('message', sa.Text(), nullable=False),
+        sa.Column('data', sa.Text(), nullable=True),  # JSON string for i18n dynamic values
         sa.Column('related_type', sa.String(50), nullable=True),
         sa.Column('related_id', sa.Integer(), nullable=True),
         sa.Column('is_read', sa.Boolean(), default=False),
