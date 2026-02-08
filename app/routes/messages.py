@@ -6,7 +6,7 @@ from app.models import User, Conversation, Message
 from app.utils import token_required, get_display_name, send_push_safe
 from app.socket_events import emit_new_message
 from datetime import datetime
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 import traceback
 import logging
 
@@ -435,30 +435,23 @@ def mark_all_read(current_user_id, conversation_id):
 @messages_bp.route('/unread-count', methods=['GET'])
 @token_required
 def get_unread_count(current_user_id):
-    """Get total unread message count for current user."""
+    """Get total unread message count for current user.
+    
+    Uses a single efficient SQL query instead of looping over conversations.
+    Returns 0 on error to prevent 500s from flooding the frontend.
+    """
     try:
-        logger.info(f"Getting unread count for user {current_user_id}")
-        
-        # Get all conversations where user is a participant
-        conversations = Conversation.query.filter(
+        # Single query: count all unread messages across all user's conversations
+        total_unread = db.session.query(func.count(Message.id)).join(
+            Conversation, Message.conversation_id == Conversation.id
+        ).filter(
             or_(
                 Conversation.participant_1_id == current_user_id,
                 Conversation.participant_2_id == current_user_id
-            )
-        ).all()
-        
-        logger.info(f"Found {len(conversations)} conversations for user {current_user_id}")
-        
-        total_unread = 0
-        for conv in conversations:
-            try:
-                unread = conv.get_unread_count(current_user_id)
-                logger.info(f"Conversation {conv.id}: {unread} unread messages")
-                total_unread += unread
-            except Exception as conv_error:
-                logger.error(f"Error getting unread count for conversation {conv.id}: {conv_error}")
-                logger.error(traceback.format_exc())
-                # Continue with other conversations
+            ),
+            Message.sender_id != current_user_id,
+            Message.is_read == False
+        ).scalar() or 0
         
         return jsonify({
             'unread_count': total_unread
@@ -466,4 +459,5 @@ def get_unread_count(current_user_id):
     except Exception as e:
         logger.error(f"Error in get_unread_count: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        # Return 0 instead of 500 — this is a non-critical polling endpoint
+        return jsonify({'unread_count': 0}), 200
