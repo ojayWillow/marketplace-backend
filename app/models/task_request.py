@@ -15,6 +15,7 @@ class TaskRequest(db.Model):
     category = db.Column(db.String(50), nullable=False, index=True)  # 'delivery', 'cleaning', 'repair', 'tutoring', etc.
     budget = db.Column(db.Float, nullable=True)
     currency = db.Column(db.String(3), default='EUR', nullable=False)
+    difficulty = db.Column(db.String(20), default='medium', nullable=False)  # 'easy', 'medium', 'hard'
     location = db.Column(db.String(255), nullable=False)
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
@@ -91,6 +92,7 @@ class TaskRequest(db.Model):
             'category': self.category,
             'budget': self.budget,
             'currency': self.currency,
+            'difficulty': self.difficulty,
             'location': self.location,
             'latitude': self.latitude,
             'longitude': self.longitude,
@@ -107,6 +109,7 @@ class TaskRequest(db.Model):
             'images': self.images,
             'priority': self.priority,
             'status': self.status,
+            'difficulty': self.difficulty,
             'deadline': self.deadline.isoformat() if self.deadline else None,
             'responses_count': self.responses_count,
             'is_urgent': self.is_urgent,
