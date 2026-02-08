@@ -19,6 +19,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_RADIUS_KM = 25  # Default search radius in km — keep in sync with frontend
+
 
 def get_current_user_id_optional():
     """Extract user_id from token if present, return None otherwise."""
@@ -110,7 +112,7 @@ def get_tasks():
     Query params:
         - lang: Language code (lv, en, ru) for auto-translation
         - latitude, longitude: User location
-        - radius: Search radius in km (default 10)
+        - radius: Search radius in km (default 25)
         - status: Task status filter (default 'open')
         - category: Category filter
         - page, per_page: Pagination
@@ -125,8 +127,16 @@ def get_tasks():
         category = request.args.get('category')
         latitude = request.args.get('latitude', type=float)
         longitude = request.args.get('longitude', type=float)
-        radius = request.args.get('radius', 10, type=float)
+        radius = request.args.get('radius', DEFAULT_RADIUS_KM, type=float)
         lang = request.args.get('lang')
+        
+        # Defensive: warn if radius was explicitly sent without coordinates
+        if request.args.get('radius') and (latitude is None or longitude is None):
+            logger.warning(
+                'GET /api/tasks: radius=%s provided without latitude/longitude — '
+                'radius will be ignored, returning all tasks',
+                request.args.get('radius')
+            )
         
         # Get current user ID if authenticated (for has_applied check)
         current_user_id = get_current_user_id_optional()
