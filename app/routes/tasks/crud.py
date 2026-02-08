@@ -306,13 +306,12 @@ def create_task():
             except ValueError:
                 return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
         
-        # Note: difficulty field is sent by mobile app but not stored in TaskRequest model
-        # We validate it here but don't pass it to the constructor
+        # Validate difficulty
         difficulty = data.get('difficulty', 'medium')
         if difficulty not in ['easy', 'medium', 'hard']:
             return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
         
-        # Create task WITHOUT payment fields (they're commented out in the model)
+        # Create task with difficulty field
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
@@ -322,6 +321,7 @@ def create_task():
             longitude=data['longitude'],
             creator_id=data['creator_id'],
             budget=data.get('budget'),
+            difficulty=difficulty,
             deadline=deadline,
             priority=data.get('priority', 'normal'),
             is_urgent=data.get('is_urgent', False),
@@ -331,7 +331,7 @@ def create_task():
         db.session.add(task)
         db.session.commit()
         
-        logger.info(f'Task created successfully: {task.id}, images: {task.images}')
+        logger.info(f'Task created successfully: {task.id}, difficulty: {task.difficulty}, images: {task.images}')
         
         return jsonify({
             'message': 'Task created successfully',
@@ -381,11 +381,11 @@ def update_task(current_user_id, task_id):
         if 'images' in data:
             task.images = data['images']
         
-        # Note: difficulty field is validated but not stored (TaskRequest model doesn't have this field)
+        # Update difficulty if provided
         if 'difficulty' in data:
             if data['difficulty'] not in ['easy', 'medium', 'hard']:
                 return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
-            # Field is valid but we don't set it since the model doesn't support it
+            task.difficulty = data['difficulty']
         
         if 'deadline' in data:
             if data['deadline']:
