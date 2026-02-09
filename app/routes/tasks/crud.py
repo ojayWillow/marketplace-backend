@@ -20,6 +20,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_RADIUS_KM = 25  # Default search radius in km — keep in sync with frontend
+MIN_RESULTS_DEFAULT = 5  # Minimum results before auto-expanding radius
+RADIUS_EXPANSION_STEPS = [50, 100, 200, 500]  # km steps to try if initial radius returns too few
 
 
 def get_current_user_id_optional():
@@ -105,6 +107,36 @@ def batch_translate_tasks(tasks_list: list[dict], lang: str | None) -> list[dict
     return tasks_list
 
 
+def _find_tasks_within_radius(base_query, latitude, longitude, radius_km):
+    """Find tasks within a given radius from coordinates.
+    
+    Returns list of (task_id, task_dict) tuples sorted by distance.
+    Uses bounding box pre-filter + Haversine exact distance.
+    """
+    min_lat, max_lat, min_lng, max_lng = get_bounding_box(latitude, longitude, radius_km)
+    query = base_query.filter(
+        TaskRequest.latitude.isnot(None),
+        TaskRequest.longitude.isnot(None),
+        TaskRequest.latitude >= min_lat,
+        TaskRequest.latitude <= max_lat,
+        TaskRequest.longitude >= min_lng,
+        TaskRequest.longitude <= max_lng
+    )
+    
+    all_tasks = query.all()
+    
+    tasks_with_distance = []
+    for task in all_tasks:
+        dist = distance(latitude, longitude, task.latitude, task.longitude)
+        if dist <= radius_km:
+            task_dict = task.to_dict()
+            task_dict['distance'] = round(dist, 2)
+            tasks_with_distance.append((task.id, task_dict))
+    
+    tasks_with_distance.sort(key=lambda x: x[1]['distance'])
+    return tasks_with_distance
+
+
 @tasks_bp.route('', methods=['GET'])
 def get_tasks():
     """Get task requests with filtering, geolocation, and optional translation.
@@ -113,9 +145,22 @@ def get_tasks():
         - lang: Language code (lv, en, ru) for auto-translation
         - latitude, longitude: User location
         - radius: Search radius in km (default 25)
+        - min_results: Minimum results before auto-expanding radius (default 5).
+                       If initial radius returns fewer than this, backend expands
+                       the radius automatically in steps until enough are found.
+                       Set to 0 to disable auto-expansion.
         - status: Task status filter (default 'open')
-        - category: Category filter
+        - category: Category filter. Supports comma-separated values for
+                    multi-category filtering (e.g. "cleaning,delivery,repair")
         - page, per_page: Pagination
+    
+    Response includes:
+        - tasks: list of task objects with distance
+        - total: total matching tasks
+        - effective_radius: the actual radius used (may differ from requested
+                           if auto-expanded)
+        - radius_expanded: boolean, true if radius was auto-expanded beyond
+                          the requested value
     
     If authenticated, each task includes:
         - has_applied: boolean indicating if current user has applied
@@ -128,6 +173,7 @@ def get_tasks():
         latitude = request.args.get('latitude', type=float)
         longitude = request.args.get('longitude', type=float)
         radius = request.args.get('radius', DEFAULT_RADIUS_KM, type=float)
+        min_results = request.args.get('min_results', MIN_RESULTS_DEFAULT, type=int)
         lang = request.args.get('lang')
         
         # Defensive: warn if radius was explicitly sent without coordinates
@@ -147,34 +193,63 @@ def get_tasks():
             joinedload(TaskRequest.assigned_user)
         ).filter_by(status=status)
         
+        # Support comma-separated categories (e.g. "cleaning,delivery")
         if category:
-            query = query.filter_by(category=category)
+            categories = [c.strip() for c in category.split(',') if c.strip()]
+            if len(categories) == 1:
+                query = query.filter_by(category=categories[0])
+            elif len(categories) > 1:
+                query = query.filter(TaskRequest.category.in_(categories))
         
         # If location filtering is requested
         if latitude is not None and longitude is not None:
-            min_lat, max_lat, min_lng, max_lng = get_bounding_box(latitude, longitude, radius)
-            query = query.filter(
-                TaskRequest.latitude.isnot(None),
-                TaskRequest.longitude.isnot(None),
-                TaskRequest.latitude >= min_lat,
-                TaskRequest.latitude <= max_lat,
-                TaskRequest.longitude >= min_lng,
-                TaskRequest.longitude <= max_lng
-            )
+            effective_radius = radius
+            radius_expanded = False
             
-            all_tasks = query.all()
+            # Initial search at requested radius
+            tasks_with_distance = _find_tasks_within_radius(query, latitude, longitude, radius)
             
-            # Filter by exact distance
-            tasks_with_distance = []
-            for task in all_tasks:
-                dist = distance(latitude, longitude, task.latitude, task.longitude)
-                if dist <= radius:
-                    task_dict = task.to_dict()
-                    task_dict['distance'] = round(dist, 2)
-                    tasks_with_distance.append((task.id, task_dict))
-            
-            # Sort by distance
-            tasks_with_distance.sort(key=lambda x: x[1]['distance'])
+            # Smart radius expansion: if too few results, expand step by step
+            if min_results > 0 and len(tasks_with_distance) < min_results:
+                for expanded_radius in RADIUS_EXPANSION_STEPS:
+                    if expanded_radius <= radius:
+                        continue  # Skip steps smaller than initial radius
+                    
+                    tasks_with_distance = _find_tasks_within_radius(
+                        query, latitude, longitude, expanded_radius
+                    )
+                    effective_radius = expanded_radius
+                    radius_expanded = True
+                    
+                    if len(tasks_with_distance) >= min_results:
+                        break
+                
+                # Final fallback: if still not enough, get ALL tasks with distance
+                if len(tasks_with_distance) < min_results:
+                    all_geo_tasks = query.filter(
+                        TaskRequest.latitude.isnot(None),
+                        TaskRequest.longitude.isnot(None),
+                    ).all()
+                    
+                    tasks_with_distance = []
+                    for task in all_geo_tasks:
+                        dist = distance(latitude, longitude, task.latitude, task.longitude)
+                        task_dict = task.to_dict()
+                        task_dict['distance'] = round(dist, 2)
+                        tasks_with_distance.append((task.id, task_dict))
+                    
+                    tasks_with_distance.sort(key=lambda x: x[1]['distance'])
+                    
+                    if tasks_with_distance:
+                        # effective_radius = distance to the farthest returned task
+                        effective_radius = tasks_with_distance[-1][1]['distance']
+                    radius_expanded = True
+                    
+                    logger.info(
+                        'Smart radius: expanded to ALL tasks (%d found) '
+                        'for location (%.4f, %.4f), original radius was %skm',
+                        len(tasks_with_distance), latitude, longitude, radius
+                    )
             
             # Pagination
             total = len(tasks_with_distance)
@@ -204,7 +279,9 @@ def get_tasks():
                 'total': total,
                 'page': page,
                 'per_page': per_page,
-                'has_more': end < total
+                'has_more': end < total,
+                'effective_radius': round(effective_radius, 1),
+                'radius_expanded': radius_expanded,
             }), 200
         else:
             # No location filtering
@@ -235,7 +312,9 @@ def get_tasks():
                 'total': tasks.total,
                 'page': page,
                 'per_page': per_page,
-                'has_more': tasks.has_next
+                'has_more': tasks.has_next,
+                'effective_radius': None,
+                'radius_expanded': False,
             }), 200
             
     except Exception as e:
