@@ -116,15 +116,7 @@ def login():
 
 @auth_bp.route('/phone/send-otp', methods=['POST'])
 def phone_send_otp():
-    """Send OTP verification code to phone number via Vonage.
-    
-    Request body:
-        - phoneNumber: Phone number to send OTP to (e.g., '+37120000000')
-        
-    Returns:
-        - success: Boolean indicating if OTP was sent
-        - message: Success message or error description
-    """
+    """Send OTP verification code to phone number via Vonage."""
     try:
         data = request.get_json()
         
@@ -133,12 +125,10 @@ def phone_send_otp():
         
         phone_number = data['phoneNumber']
         
-        # Validate phone number format
         normalized = normalize_phone_number(phone_number)
         if not normalized or len(normalized) < 10:
             return jsonify({'error': 'Invalid phone number format'}), 400
         
-        # Send OTP via Vonage
         result = send_verification_code(phone_number)
         
         if result['success']:
@@ -164,17 +154,7 @@ def phone_send_otp():
 
 @auth_bp.route('/phone/verify-otp', methods=['POST'])
 def phone_verify_otp():
-    """Verify OTP code and create/login user.
-    
-    Request body:
-        - phoneNumber: Phone number the OTP was sent to
-        - code: The 6-digit verification code
-        
-    Returns:
-        - access_token: JWT token for API calls
-        - user: User object
-        - is_new_user: Boolean indicating if new account was created
-    """
+    """Verify OTP code and create/login user."""
     try:
         data = request.get_json()
         
@@ -184,7 +164,6 @@ def phone_verify_otp():
         phone_number = data['phoneNumber']
         code = data['code']
         
-        # Verify OTP via Vonage
         result = verify_code(phone_number, code)
         
         if not result['success']:
@@ -193,14 +172,12 @@ def phone_verify_otp():
                 'error': result['error']
             }), 400
         
-        # OTP verified - now find or create user
         normalized_phone = result['phone']
         
         user = User.query.filter_by(phone=normalized_phone).first()
         is_new_user = False
         
         if user:
-            # Existing user - update phone verification status
             if not user.is_active:
                 return jsonify({'error': 'Account is disabled'}), 403
             
@@ -210,19 +187,17 @@ def phone_verify_otp():
             
             current_app.logger.info(f"Phone login: existing user {user.id}")
         else:
-            # New user - create account with phone
             is_new_user = True
             temp_username = generate_temp_username()
-            temp_email = f"{temp_username}@phone.tirgus.local"  # Placeholder email
+            temp_email = f"{temp_username}@phone.tirgus.local"
             
             user = User(
                 username=temp_username,
                 email=temp_email,
                 phone=normalized_phone,
                 phone_verified=True,
-                is_verified=True  # Phone-verified users are considered verified
+                is_verified=True
             )
-            # Set a random password (user won't use it for phone auth)
             user.set_password(generate_temp_password())
             
             db.session.add(user)
@@ -230,7 +205,6 @@ def phone_verify_otp():
             
             current_app.logger.info(f"Phone login: new user created {user.id}")
         
-        # Generate JWT token
         payload = {
             'user_id': user.id,
             'username': user.username,
@@ -256,17 +230,7 @@ def phone_verify_otp():
 @auth_bp.route('/phone/link-otp', methods=['POST'])
 @token_required
 def phone_link_otp(current_user_id):
-    """Link a verified phone number to existing user account.
-    
-    Requires: User must be logged in
-    
-    Request body:
-        - phoneNumber: Phone number the OTP was sent to
-        - code: The verification code
-        
-    Returns:
-        - user: Updated user object with phone_verified=true
-    """
+    """Link a verified phone number to existing user account."""
     try:
         user = User.query.get(current_user_id)
         
@@ -284,7 +248,6 @@ def phone_link_otp(current_user_id):
         phone_number = data['phoneNumber']
         code = data['code']
         
-        # Verify OTP via Vonage
         result = verify_code(phone_number, code)
         
         if not result['success']:
@@ -295,17 +258,15 @@ def phone_link_otp(current_user_id):
         
         normalized_phone = result['phone']
         
-        # Check if this phone is already linked to another account
         existing_user = User.query.filter_by(phone=normalized_phone).first()
         if existing_user and existing_user.id != user.id:
             return jsonify({
                 'error': 'This phone number is already linked to another account'
             }), 409
         
-        # Link phone to user account
         user.phone = normalized_phone
         user.phone_verified = True
-        user.is_verified = True  # Mark user as verified
+        user.is_verified = True
         user.updated_at = datetime.utcnow()
         
         db.session.commit()
@@ -327,16 +288,7 @@ def phone_link_otp(current_user_id):
 
 @auth_bp.route('/phone/check/<phone>', methods=['GET'])
 def phone_check(phone):
-    """Check if a phone number is already registered.
-    
-    Useful for frontend to determine whether to show "Login" or "Register" flow.
-    
-    Args:
-        phone: Phone number to check (URL parameter)
-        
-    Returns:
-        - exists: boolean indicating if phone is registered
-    """
+    """Check if a phone number is already registered."""
     try:
         normalized_phone = normalize_phone_number(phone)
         
@@ -364,10 +316,8 @@ def phone_verify():
     """Legacy Firebase phone verification endpoint.
     
     DEPRECATED: Use /phone/send-otp and /phone/verify-otp instead.
-    This endpoint is kept for backward compatibility with older app versions.
     """
     try:
-        # Try to import Firebase (may not be configured)
         try:
             from app.services.firebase import verify_firebase_token, normalize_phone_number as firebase_normalize
         except ImportError:
@@ -381,23 +331,19 @@ def phone_verify():
         id_token = data['idToken']
         provided_phone = data.get('phoneNumber')
         
-        # Verify Firebase token
         try:
             firebase_data = verify_firebase_token(id_token)
         except ValueError as e:
             current_app.logger.warning(f"Firebase token verification failed: {e}")
             return jsonify({'error': str(e)}), 401
         
-        # Get verified phone number from Firebase
         verified_phone = firebase_data.get('phone_number')
         
         if not verified_phone:
             return jsonify({'error': 'Phone number not verified in token'}), 401
         
-        # Normalize phone number
         normalized_phone = firebase_normalize(verified_phone)
         
-        # Optional: Verify provided phone matches token (extra security)
         if provided_phone:
             normalized_provided = firebase_normalize(provided_phone)
             if normalized_provided != normalized_phone:
@@ -406,12 +352,10 @@ def phone_verify():
                 )
                 return jsonify({'error': 'Phone number mismatch'}), 401
         
-        # Find or create user by phone number
         user = User.query.filter_by(phone=normalized_phone).first()
         is_new_user = False
         
         if user:
-            # Existing user - update phone verification status
             if not user.is_active:
                 return jsonify({'error': 'Account is disabled'}), 403
             
@@ -421,19 +365,17 @@ def phone_verify():
             
             current_app.logger.info(f"Phone login: existing user {user.id}")
         else:
-            # New user - create account with phone
             is_new_user = True
             temp_username = generate_temp_username()
-            temp_email = f"{temp_username}@phone.tirgus.local"  # Placeholder email
+            temp_email = f"{temp_username}@phone.tirgus.local"
             
             user = User(
                 username=temp_username,
                 email=temp_email,
                 phone=normalized_phone,
                 phone_verified=True,
-                is_verified=True  # Phone-verified users are considered verified
+                is_verified=True
             )
-            # Set a random password (user won't use it for phone auth)
             user.set_password(generate_temp_password())
             
             db.session.add(user)
@@ -441,7 +383,6 @@ def phone_verify():
             
             current_app.logger.info(f"Phone login: new user created {user.id}")
         
-        # Generate our JWT token
         payload = {
             'user_id': user.id,
             'username': user.username,
@@ -491,33 +432,28 @@ def phone_link(current_user_id):
         
         id_token = data['idToken']
         
-        # Verify Firebase token
         try:
             firebase_data = verify_firebase_token(id_token)
         except ValueError as e:
             current_app.logger.warning(f"Firebase token verification failed: {e}")
             return jsonify({'error': str(e)}), 401
         
-        # Get verified phone number from Firebase
         verified_phone = firebase_data.get('phone_number')
         
         if not verified_phone:
             return jsonify({'error': 'Phone number not verified in token'}), 401
         
-        # Normalize phone number
         normalized_phone = firebase_normalize(verified_phone)
         
-        # Check if this phone is already linked to another account
         existing_user = User.query.filter_by(phone=normalized_phone).first()
         if existing_user and existing_user.id != user.id:
             return jsonify({
                 'error': 'This phone number is already linked to another account'
             }), 409
         
-        # Link phone to user account
         user.phone = normalized_phone
         user.phone_verified = True
-        user.is_verified = True  # Mark user as verified
+        user.is_verified = True
         user.updated_at = datetime.utcnow()
         
         db.session.commit()
@@ -539,19 +475,7 @@ def phone_link(current_user_id):
 @auth_bp.route('/complete-registration', methods=['PUT'])
 @token_required
 def complete_registration(current_user_id):
-    """Complete registration for phone-authenticated users.
-    
-    New phone users get a temporary username. This endpoint lets them
-    set their actual username and optionally add an email.
-    
-    Request body:
-        - username: Desired username (required)
-        - email: Email address (optional)
-        
-    Returns:
-        - access_token: New JWT with updated username
-        - user: Updated user object
-    """
+    """Complete registration for phone-authenticated users."""
     try:
         user = User.query.get(current_user_id)
         
@@ -566,7 +490,6 @@ def complete_registration(current_user_id):
         new_username = data['username'].lower().strip()
         new_email = data.get('email', '').lower().strip() if data.get('email') else None
         
-        # Validate username
         if len(new_username) < 3:
             return jsonify({'error': 'Username must be at least 3 characters'}), 400
         
@@ -576,14 +499,11 @@ def complete_registration(current_user_id):
         if not new_username.replace('_', '').isalnum():
             return jsonify({'error': 'Username can only contain letters, numbers, and underscores'}), 400
         
-        # Check if username is taken (by another user)
         existing_user = User.query.filter_by(username=new_username).first()
         if existing_user and existing_user.id != user.id:
             return jsonify({'error': 'Username already exists'}), 409
         
-        # Check email if provided
         if new_email:
-            # Basic email validation
             if '@' not in new_email or '.' not in new_email:
                 return jsonify({'error': 'Invalid email format'}), 400
             
@@ -593,13 +513,11 @@ def complete_registration(current_user_id):
             
             user.email = new_email
         
-        # Update username
         user.username = new_username
         user.updated_at = datetime.utcnow()
         
         db.session.commit()
         
-        # Generate new token with updated username
         payload = {
             'user_id': user.id,
             'username': user.username,
@@ -620,7 +538,7 @@ def complete_registration(current_user_id):
 
 
 # ============================================================================
-# EXISTING ENDPOINTS (unchanged)
+# PROFILE & USER ENDPOINTS
 # ============================================================================
 
 @auth_bp.route('/forgot-password', methods=['POST'])
@@ -709,22 +627,22 @@ def reset_password():
 @auth_bp.route('/profile', methods=['GET'])
 @token_required
 def get_profile(current_user_id):
-    """Get current user profile."""
+    """Get current user profile.
+    
+    Uses user.rating and user.review_count which are now efficient
+    single-query properties (func.avg + func.count, cached per instance).
+    """
     try:
         user = User.query.get(current_user_id)
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        reviews_received = Review.query.filter_by(reviewed_user_id=current_user_id).all()
-        
-        avg_rating = 0
-        if reviews_received:
-            avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
-        
         user_data = user.to_dict()
-        user_data['reviews_count'] = len(reviews_received)
-        user_data['average_rating'] = round(avg_rating, 1)
+        # to_dict() already includes rating and review_count from the
+        # cached property. Add the legacy field names for compatibility.
+        user_data['reviews_count'] = user.review_count
+        user_data['average_rating'] = round(user.rating, 1) if user.rating else 0
         
         return jsonify(user_data), 200
     except Exception as e:
@@ -741,18 +659,16 @@ def get_profile_full(current_user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
+        # Use efficient properties for rating stats
+        profile_data = user.to_dict()
+        profile_data['reviews_count'] = user.review_count
+        profile_data['average_rating'] = round(user.rating, 1) if user.rating else 0
+        
+        # Load reviews with reviewer data (eagerly) for the reviews list
         reviews_received = Review.query\
             .filter_by(reviewed_user_id=current_user_id)\
             .options(joinedload(Review.reviewer))\
             .order_by(Review.created_at.desc()).all()
-        
-        avg_rating = 0
-        if reviews_received:
-            avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
-        
-        profile_data = user.to_dict()
-        profile_data['reviews_count'] = len(reviews_received)
-        profile_data['average_rating'] = round(avg_rating, 1)
         
         reviews_data = []
         for review in reviews_received:
@@ -911,21 +827,22 @@ def update_profile(current_user_id):
 
 @auth_bp.route('/users/<int:user_id>', methods=['GET'])
 def get_user_public(user_id):
-    """Get public profile of any user."""
+    """Get public profile of any user.
+    
+    Uses efficient batch queries for review stats and completed tasks
+    instead of loading all Review rows into memory.
+    """
     try:
         user = User.query.get(user_id)
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        reviews_received = Review.query.filter_by(reviewed_user_id=user_id).all()
+        # Efficient: uses cached single-query property
+        avg_rating = user.rating or 0
+        review_count = user.review_count
         
-        avg_rating = 0
-        if reviews_received:
-            avg_rating = sum(r.rating for r in reviews_received) / len(reviews_received)
-        
-        # Calculate completed tasks count
-        # Count tasks where user was creator OR assigned helper, and status is 'completed'
+        # Efficient: single COUNT query
         completed_tasks_count = TaskRequest.query.filter(
             or_(
                 TaskRequest.creator_id == user_id,
@@ -947,7 +864,7 @@ def get_user_public(user_id):
             'is_verified': user.is_verified,
             'reputation_score': user.reputation_score,
             'completion_rate': user.completion_rate,
-            'reviews_count': len(reviews_received),
+            'reviews_count': review_count,
             'average_rating': round(avg_rating, 1),
             'completed_tasks_count': completed_tasks_count,
             'is_helper': user.is_helper,

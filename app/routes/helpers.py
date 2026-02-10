@@ -36,6 +36,9 @@ def get_helpers():
     - category: Filter by skill category
     - page: Page number (default: 1)
     - per_page: Items per page (default: 20)
+    
+    Performance: Uses batch queries for review stats instead of
+    per-user queries. 1 query for all ratings regardless of user count.
     """
     try:
         latitude = request.args.get('latitude', type=float)
@@ -45,11 +48,6 @@ def get_helpers():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         
-        # Get users who have:
-        # 1. is_helper = True OR
-        # 2. Have completed at least one task (they've helped before)
-        # 3. Are active users
-        
         # Subquery to count completed tasks for each user
         completed_tasks_subq = db.session.query(
             TaskRequest.assigned_to_id,
@@ -58,7 +56,7 @@ def get_helpers():
             TaskRequest.status == 'completed'
         ).group_by(TaskRequest.assigned_to_id).subquery()
         
-        # Query users
+        # Query users with completed task count joined
         query = db.session.query(
             User,
             func.coalesce(completed_tasks_subq.c.completed_count, 0).label('completed_tasks')
@@ -69,7 +67,7 @@ def get_helpers():
             User.is_active == True
         )
         
-        # Filter: only users who have is_helper=True OR have completed at least 1 task
+        # Filter: only helpers or users with completed tasks
         query = query.filter(
             db.or_(
                 User.is_helper == True,
@@ -77,37 +75,37 @@ def get_helpers():
             )
         )
         
-        # Execute query
         results = query.all()
+        
+        # BATCH: Get review stats for ALL helpers in ONE query
+        helper_user_ids = [user.id for user, _ in results]
+        review_stats = User.get_review_stats_batch(helper_user_ids)
         
         helpers = []
         for user, completed_count in results:
-            # Calculate average rating
-            reviews = Review.query.filter_by(reviewed_user_id=user.id).all()
-            avg_rating = 0
-            if reviews:
-                avg_rating = sum(r.rating for r in reviews) / len(reviews)
+            # Use batch-loaded stats (no per-user query)
+            avg_rating, review_count = review_stats.get(user.id, (None, 0))
+            avg_rating = avg_rating or 0
             
             # Calculate distance if coordinates provided
             distance = None
             if latitude and longitude and user.latitude and user.longitude:
                 distance = calculate_distance(latitude, longitude, user.latitude, user.longitude)
                 
-                # Skip if outside radius
                 if distance > radius:
                     continue
             
             helper_data = {
                 'id': user.id,
                 'name': user.username,
-                'email': user.email,  # Only public if user allows
+                'email': user.email,
                 'avatar': user.avatar_url or user.profile_picture_url,
                 'bio': user.bio,
                 'city': user.city,
                 'latitude': user.latitude,
                 'longitude': user.longitude,
                 'rating': round(avg_rating, 1),
-                'review_count': len(reviews),
+                'review_count': review_count,
                 'completed_tasks': completed_count or 0,
                 'skills': user.skills.split(',') if user.skills else [],
                 'categories': user.helper_categories.split(',') if user.helper_categories else [],
