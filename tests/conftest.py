@@ -23,11 +23,10 @@ fake = Faker()
 @pytest.fixture(scope='session')
 def app():
     """Create application for testing."""
-    # Set test configuration
     os.environ['FLASK_ENV'] = 'testing'
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-testing'
-    
-    app = create_app()
+
+    app = create_app('testing')
     app.config.update({
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
@@ -35,14 +34,12 @@ def app():
         'JWT_SECRET_KEY': 'test-secret-key-for-testing',
         'WTF_CSRF_ENABLED': False,
     })
-    
-    # Create tables
+
     with app.app_context():
         db.create_all()
-    
+
     yield app
-    
-    # Cleanup
+
     with app.app_context():
         db.drop_all()
 
@@ -57,7 +54,6 @@ def client(app):
 def db_session(app):
     """Create a fresh database session for each test."""
     with app.app_context():
-        # Clear all tables before each test
         for table in reversed(db.metadata.sorted_tables):
             db.session.execute(table.delete())
         db.session.commit()
@@ -65,139 +61,107 @@ def db_session(app):
         db.session.rollback()
 
 
+def _create_user(password='testpassword123', **overrides):
+    """Helper to create a user with sensible defaults."""
+    data = {
+        'username': fake.user_name() + fake.pystr(min_chars=4, max_chars=6),
+        'email': fake.unique.email(),
+        'first_name': fake.first_name(),
+        'last_name': fake.last_name(),
+    }
+    data.update(overrides)
+    user = User(**{k: v for k, v in data.items() if k != 'password'})
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    return {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'password': password,
+    }
+
+
 @pytest.fixture
 def test_user(app, db_session):
     """Create a test user."""
     with app.app_context():
-        user = User(
-            username=fake.user_name(),
-            email=fake.email(),
-            password_hash='test_hash'
-        )
-        user.set_password('testpassword123')
-        db.session.add(user)
-        db.session.commit()
-        
-        # Return user data as dict since we're outside context later
-        return {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'password': 'testpassword123'
-        }
+        return _create_user()
 
 
 @pytest.fixture
 def second_user(app, db_session):
     """Create a second test user for interaction tests."""
     with app.app_context():
-        user = User(
-            username=fake.user_name(),
-            email=fake.email(),
-            password_hash='test_hash'
-        )
-        user.set_password('testpassword456')
-        db.session.add(user)
-        db.session.commit()
-        
-        return {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'password': 'testpassword456'
-        }
+        return _create_user(password='testpassword456')
+
+
+def _get_token(client, email, password):
+    """Login and return JWT token."""
+    resp = client.post('/api/auth/login', json={
+        'email': email,
+        'password': password,
+    })
+    data = resp.get_json()
+    return data.get('access_token') or data.get('token')
 
 
 @pytest.fixture
 def auth_headers(client, test_user):
     """Get authentication headers for test user."""
-    response = client.post('/api/auth/login', json={
-        'email': test_user['email'],
-        'password': test_user['password']
-    })
-    token = response.json.get('access_token') or response.json.get('token')
+    token = _get_token(client, test_user['email'], test_user['password'])
     return {'Authorization': f'Bearer {token}'}
 
 
 @pytest.fixture
 def second_auth_headers(client, second_user):
     """Get authentication headers for second user."""
-    response = client.post('/api/auth/login', json={
-        'email': second_user['email'],
-        'password': second_user['password']
-    })
-    token = response.json.get('access_token') or response.json.get('token')
+    token = _get_token(client, second_user['email'], second_user['password'])
     return {'Authorization': f'Bearer {token}'}
 
 
 @pytest.fixture
 def test_listing(app, db_session, test_user):
-    """Create a test listing."""
+    """Create a test listing matching actual Listing model."""
     with app.app_context():
         listing = Listing(
             title=fake.sentence(nb_words=4),
             description=fake.paragraph(),
-            price=fake.pyfloat(min_value=10, max_value=1000, right_digits=2),
+            price=round(fake.pyfloat(min_value=10, max_value=500, right_digits=2), 2),
             category='electronics',
             status='active',
-            user_id=test_user['id']
+            seller_id=test_user['id'],
         )
         db.session.add(listing)
         db.session.commit()
-        
         return {
             'id': listing.id,
             'title': listing.title,
-            'user_id': listing.user_id
+            'seller_id': listing.seller_id,
         }
 
 
 @pytest.fixture
 def test_task(app, db_session, test_user):
-    """Create a test task."""
+    """Create a test task matching actual TaskRequest model."""
     with app.app_context():
         task = TaskRequest(
             title=fake.sentence(nb_words=4),
             description=fake.paragraph(),
-            budget=fake.pyfloat(min_value=20, max_value=500, right_digits=2),
+            budget=round(fake.pyfloat(min_value=20, max_value=500, right_digits=2), 2),
             category='cleaning',
             status='open',
-            location_lat=56.9496,
-            location_lng=24.1052,
-            location_address='Riga, Latvia',
-            user_id=test_user['id']
+            location='Riga, Latvia',
+            latitude=56.9496,
+            longitude=24.1052,
+            creator_id=test_user['id'],
         )
         db.session.add(task)
         db.session.commit()
-        
         return {
             'id': task.id,
             'title': task.title,
-            'user_id': task.user_id
-        }
-
-
-@pytest.fixture
-def test_offering(app, db_session, test_user):
-    """Create a test offering."""
-    with app.app_context():
-        offering = Offering(
-            title=fake.sentence(nb_words=4),
-            description=fake.paragraph(),
-            price=fake.pyfloat(min_value=15, max_value=100, right_digits=2),
-            price_type='hourly',
-            category='handyman',
-            status='active',
-            location_lat=56.9496,
-            location_lng=24.1052,
-            location_address='Riga, Latvia',
-            user_id=test_user['id']
-        )
-        db.session.add(offering)
-        db.session.commit()
-        
-        return {
-            'id': offering.id,
-            'title': offering.title,
-            'user_id': offering.user_id
+            'creator_id': task.creator_id,
         }
