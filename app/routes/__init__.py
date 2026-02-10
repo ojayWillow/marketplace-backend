@@ -20,7 +20,6 @@ def register_routes(app):
     from .listings import listings_bp
     from .tasks import tasks_bp
     from .reviews import reviews_bp
-    from .task_responses import task_responses_bp
     from .uploads import uploads_bp
     from .messages import messages_bp
     from .helpers import helpers_bp
@@ -39,7 +38,6 @@ def register_routes(app):
     app.register_blueprint(listings_bp, url_prefix='/api/listings')
     app.register_blueprint(tasks_bp, url_prefix='/api/tasks')
     app.register_blueprint(reviews_bp, url_prefix='/api/reviews')
-    app.register_blueprint(task_responses_bp, url_prefix='/api/task_responses')
     app.register_blueprint(uploads_bp, url_prefix='/api/uploads')
     app.register_blueprint(messages_bp, url_prefix='/api/messages')
     app.register_blueprint(helpers_bp, url_prefix='/api/helpers')
