@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import func
 from app import db
 
 
@@ -32,39 +33,105 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)  # Track user activity
     
-    # NEW: Presence tracking fields
-    is_online = db.Column(db.Boolean, default=False, nullable=False)  # Real-time Socket.IO connection status
-    socket_id = db.Column(db.String(100), nullable=True)  # Current Socket.IO session ID
+    # Presence tracking fields
+    is_online = db.Column(db.Boolean, default=False, nullable=False)
+    socket_id = db.Column(db.String(100), nullable=True)
     
-    # Helper-specific fields (all nullable for SQLite compatibility)
-    is_helper = db.Column(db.Boolean, default=False, nullable=True)  # User is available to help
-    skills = db.Column(db.Text, nullable=True)  # Comma-separated list of skills
-    helper_categories = db.Column(db.Text, nullable=True)  # Comma-separated categories they help with
-    hourly_rate = db.Column(db.Float, nullable=True)  # Optional hourly rate
-    latitude = db.Column(db.Float, nullable=True)  # User's location latitude
-    longitude = db.Column(db.Float, nullable=True)  # User's location longitude
+    # Helper-specific fields
+    is_helper = db.Column(db.Boolean, default=False, nullable=True)
+    skills = db.Column(db.Text, nullable=True)
+    helper_categories = db.Column(db.Text, nullable=True)
+    hourly_rate = db.Column(db.Float, nullable=True)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     
-    # Relationships - using lazy='joined' for eager loading to prevent N+1 queries
-    # Note: For task lists, we query TaskRequest directly, so we keep these as lazy='dynamic'
-    # to avoid loading all user's tasks when we just need the user info
+    # Relationships
     listings = db.relationship('Listing', backref='seller', lazy='dynamic', foreign_keys='Listing.seller_id')
     task_requests = db.relationship('TaskRequest', backref='creator', lazy='dynamic', foreign_keys='TaskRequest.creator_id')
     assigned_tasks = db.relationship('TaskRequest', backref='assigned_user', lazy='dynamic', foreign_keys='TaskRequest.assigned_to_id')
     
+    # --- Review stats (cached per-request to avoid N+1) ---
+    _review_stats_cache = None
+    
+    def _get_review_stats(self):
+        """Get rating + review_count in a SINGLE query. Cached per instance."""
+        if self._review_stats_cache is None:
+            from app.models.review import Review
+            result = db.session.query(
+                func.avg(Review.rating),
+                func.count(Review.id)
+            ).filter(
+                Review.reviewed_user_id == self.id
+            ).first()
+            
+            avg_rating = round(float(result[0]), 2) if result[0] is not None else None
+            count = result[1] or 0
+            self._review_stats_cache = (avg_rating, count)
+        return self._review_stats_cache
+    
     @property
     def rating(self):
-        """Calculate average rating from reviews received."""
-        from app.models import Review
-        reviews = Review.query.filter_by(reviewed_user_id=self.id).all()
-        if not reviews:
-            return None
-        return sum(r.rating for r in reviews) / len(reviews)
+        """Average rating from reviews received (single query, cached)."""
+        return self._get_review_stats()[0]
     
     @property
     def review_count(self):
-        """Get total number of reviews received."""
-        from app.models import Review
-        return Review.query.filter_by(reviewed_user_id=self.id).count()
+        """Total number of reviews received (single query, cached)."""
+        return self._get_review_stats()[1]
+    
+    @staticmethod
+    def get_review_stats_batch(user_ids):
+        """Get rating + review_count for multiple users in ONE query.
+        
+        Returns dict: {user_id: (avg_rating, review_count)}
+        Use this when serializing lists of users/applications to avoid N+1.
+        """
+        if not user_ids:
+            return {}
+        
+        from app.models.review import Review
+        results = db.session.query(
+            Review.reviewed_user_id,
+            func.avg(Review.rating),
+            func.count(Review.id)
+        ).filter(
+            Review.reviewed_user_id.in_(user_ids)
+        ).group_by(Review.reviewed_user_id).all()
+        
+        stats = {}
+        for user_id, avg_rating, count in results:
+            avg_r = round(float(avg_rating), 2) if avg_rating is not None else None
+            stats[user_id] = (avg_r, count)
+        
+        # Fill in users with no reviews
+        for uid in user_ids:
+            if uid not in stats:
+                stats[uid] = (None, 0)
+        
+        return stats
+    
+    @staticmethod
+    def get_completed_tasks_batch(user_ids):
+        """Get completed task count for multiple users in ONE query.
+        
+        Returns dict: {user_id: completed_count}
+        """
+        if not user_ids:
+            return {}
+        
+        from app.models.task_request import TaskRequest
+        results = db.session.query(
+            TaskRequest.assigned_to_id,
+            func.count(TaskRequest.id)
+        ).filter(
+            TaskRequest.assigned_to_id.in_(user_ids),
+            TaskRequest.status == 'completed'
+        ).group_by(TaskRequest.assigned_to_id).all()
+        
+        counts = {uid: 0 for uid in user_ids}
+        for user_id, count in results:
+            counts[user_id] = count
+        return counts
     
     def set_password(self, password):
         """Hash and set the user password."""
@@ -82,43 +149,24 @@ class User(db.Model):
         """
         Get user's online status based on is_online flag and last_seen.
         Returns: 'online', 'recently', or 'offline'
-        
-        Priority:
-        1. If is_online=True -> 'online' (has active Socket.IO connection)
-        2. If last_seen < 5 min -> 'online' (just disconnected, consider online)
-        3. If last_seen < 30 min -> 'recently' (recently active)
-        4. Else -> 'offline'
         """
-        # Priority 1: Real-time Socket.IO connection
         if self.is_online:
             return 'online'
         
-        # No last_seen data
         if not self.last_seen:
             return 'offline'
         
         now = datetime.utcnow()
         time_diff = now - self.last_seen
         
-        # Priority 2: Just disconnected (< 5 minutes)
         if time_diff < timedelta(minutes=5):
             return 'online'
-        
-        # Priority 3: Recently active (< 30 minutes)
         if time_diff < timedelta(minutes=30):
             return 'recently'
-        
-        # Default: Offline
         return 'offline'
     
     def get_last_seen_display(self):
-        """
-        Get human-readable last seen text.
-        Returns string like "5 minutes ago", "2 hours ago", "3 days ago"
-        
-        Returns None if user is currently online (is_online=True)
-        """
-        # Don't show "last seen" if user is currently online
+        """Get human-readable last seen text. None if currently online."""
         if self.is_online:
             return None
         
@@ -173,7 +221,7 @@ class User(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
-            'is_online': self.is_online,  # NEW: Include real-time online status
+            'is_online': self.is_online,
             'online_status': self.get_online_status(),
             'last_seen_display': self.get_last_seen_display()
         }
@@ -200,7 +248,7 @@ class User(db.Model):
             'rating': self.rating,
             'review_count': self.review_count,
             'created_at': self.created_at.isoformat(),
-            'is_online': self.is_online,  # NEW: Include real-time online status
+            'is_online': self.is_online,
             'online_status': self.get_online_status(),
             'last_seen_display': self.get_last_seen_display()
         }
