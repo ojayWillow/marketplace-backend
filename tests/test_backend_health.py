@@ -146,8 +146,8 @@ class TestTasks:
         resp = client.get('/api/tasks')
         assert resp.status_code == 200
 
-    def test_create_task(self, client, auth_headers, test_user, db_session):
-        """Create task — route requires creator_id in body (no @token_required)."""
+    def test_create_task(self, client, auth_headers, db_session):
+        """Create task — creator_id comes from JWT, not request body."""
         resp = client.post('/api/tasks', headers=auth_headers, json={
             'title': 'Need help moving furniture',
             'description': 'Moving from one apartment to another',
@@ -156,20 +156,29 @@ class TestTasks:
             'location': 'Riga, Latvia',
             'latitude': 56.9496,
             'longitude': 24.1052,
-            'creator_id': test_user['id'],
         })
         assert resp.status_code in (200, 201)
+        data = resp.get_json()
+        assert 'task' in data
+        assert data['task']['title'] == 'Need help moving furniture'
 
-    def test_create_task_missing_fields(self, client, db_session):
-        """Task creation without required fields returns 400.
-        
-        Note: The create_task route does NOT use @token_required — it
-        expects creator_id in the request body.  Therefore omitting
-        auth gives 400 (missing fields), not 401.
-        """
+    def test_create_task_unauthenticated(self, client, db_session):
+        """Task creation without auth returns 401 (now @token_required)."""
         resp = client.post('/api/tasks', json={
             'title': 'Should fail',
-            'description': 'No location or creator_id',
+            'description': 'No auth token',
+            'category': 'cleaning',
+            'location': 'Riga',
+            'latitude': 56.9,
+            'longitude': 24.1,
+        })
+        assert resp.status_code == 401
+
+    def test_create_task_missing_fields(self, client, auth_headers, db_session):
+        """Task creation with auth but missing required fields returns 400."""
+        resp = client.post('/api/tasks', headers=auth_headers, json={
+            'title': 'Missing location fields',
+            'description': 'Only title and description',
             'category': 'cleaning',
         })
         assert resp.status_code == 400
