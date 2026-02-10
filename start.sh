@@ -21,14 +21,15 @@ except Exception as e:
     print(f'[HOTFIX] Warning: {e}')
 " 2>&1 || echo "[HOTFIX] Warning: hotfix script failed"
 
-# Hotfix: ensure notifications table exists (was missing due to unmerged Alembic heads)
-echo "[HOTFIX] Ensuring notifications table exists..."
+# Hotfix: ensure notifications table and ALL its columns exist
+echo "[HOTFIX] Ensuring notifications table and columns exist..."
 python -c "
 import os, psycopg2
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     conn.autocommit = True
     cur = conn.cursor()
+    # Create table if it doesn't exist
     cur.execute('''
         CREATE TABLE IF NOT EXISTS notifications (
             id SERIAL PRIMARY KEY,
@@ -44,10 +45,18 @@ try:
             created_at TIMESTAMP DEFAULT NOW()
         )
     ''')
+    # Ensure all columns exist (table may have been created without some columns)
+    cur.execute('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS data TEXT')
+    cur.execute('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_type VARCHAR(50)')
+    cur.execute('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_id INTEGER')
+    cur.execute('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE')
+    cur.execute('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMP')
+    cur.execute('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()')
+    # Create indexes
     cur.execute('CREATE INDEX IF NOT EXISTS ix_notifications_user_id ON notifications(user_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS ix_notifications_is_read ON notifications(is_read)')
     cur.execute('CREATE INDEX IF NOT EXISTS ix_notifications_user_unread ON notifications(user_id, is_read)')
-    print('[HOTFIX] notifications table ready')
+    print('[HOTFIX] notifications table and all columns ready')
     conn.close()
 except Exception as e:
     print(f'[HOTFIX] Warning: {e}')
