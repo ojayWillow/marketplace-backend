@@ -1,5 +1,6 @@
 """Notification routes for user notifications."""
 
+import traceback
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Notification, NotificationType
@@ -45,6 +46,8 @@ def get_notifications(current_user_id):
             ).count()
         }), 200
     except Exception as e:
+        print(f'[NOTIFICATIONS ERROR] get_notifications: {e}')
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -53,10 +56,14 @@ def get_notifications(current_user_id):
 def get_unread_count(current_user_id):
     """Get count of unread notifications."""
     try:
+        print(f'[NOTIFICATIONS] unread-count called for user_id={current_user_id}')
+        
         unread_count = Notification.query.filter_by(
             user_id=current_user_id,
             is_read=False
         ).count()
+        
+        print(f'[NOTIFICATIONS] unread_count={unread_count}, checking accepted...')
         
         # Also get counts by type for badges
         accepted_count = Notification.query.filter_by(
@@ -65,11 +72,15 @@ def get_unread_count(current_user_id):
             type=NotificationType.APPLICATION_ACCEPTED
         ).count()
         
+        print(f'[NOTIFICATIONS] accepted_count={accepted_count}, returning 200')
+        
         return jsonify({
             'unread_count': unread_count,
             'accepted_applications': accepted_count
         }), 200
     except Exception as e:
+        print(f'[NOTIFICATIONS ERROR] unread-count: {type(e).__name__}: {e}')
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -115,6 +126,8 @@ def mark_notifications_by_type(current_user_id):
         }), 200
     except Exception as e:
         db.session.rollback()
+        print(f'[NOTIFICATIONS ERROR] mark-read: {e}')
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -232,7 +245,7 @@ def notify_application_accepted(applicant_id: int, task_title: str, task_id: int
     return create_notification(
         user_id=applicant_id,
         notification_type=NotificationType.APPLICATION_ACCEPTED,
-        title='🎉 Application Accepted!',
+        title='\U0001f389 Application Accepted!',
         message=f'Congratulations! Your application for "{task_title}" has been accepted. You can now start working on this task.',
         related_type='task',
         related_id=task_id,
@@ -284,7 +297,7 @@ def notify_task_completed(worker_id: int, task_title: str, task_id: int) -> Noti
     return create_notification(
         user_id=worker_id,
         notification_type=NotificationType.TASK_COMPLETED,
-        title='✅ Task Completed!',
+        title='\u2705 Task Completed!',
         message=f'Great job! "{task_title}" has been confirmed as complete.',
         related_type='task',
         related_id=task_id,
@@ -302,7 +315,7 @@ def notify_task_disputed(user_id: int, task_title: str, task_id: int, is_creator
     return create_notification(
         user_id=user_id,
         notification_type=NotificationType.TASK_DISPUTED,
-        title='⚠️ Task Disputed',
+        title='\u26a0\ufe0f Task Disputed',
         message=message,
         related_type='task',
         related_id=task_id,
