@@ -83,7 +83,11 @@ def apply_to_task(current_user_id, task_id):
 @tasks_bp.route('/<int:task_id>/applications', methods=['GET'])
 @token_required
 def get_task_applications(current_user_id, task_id):
-    """Get all applications for a task (only task creator can view)."""
+    """Get all applications for a task (only task creator can view).
+    
+    Uses batch queries for review stats and completed task counts
+    to avoid N+1 query problems (2 queries instead of 3N).
+    """
     try:
         task = TaskRequest.query.get(task_id)
         if not task:
@@ -92,10 +96,15 @@ def get_task_applications(current_user_id, task_id):
         if task.creator_id != current_user_id:
             return jsonify({'error': 'Only the task creator can view applications'}), 403
         
-        applications = TaskApplication.query.filter_by(task_id=task_id).order_by(TaskApplication.created_at.desc()).all()
+        applications = TaskApplication.query.filter_by(
+            task_id=task_id
+        ).order_by(
+            TaskApplication.created_at.desc()
+        ).all()
         
+        # Batch serialize: 2 queries total instead of 3N
         return jsonify({
-            'applications': [app.to_dict() for app in applications],
+            'applications': TaskApplication.to_dict_batch(applications),
             'total': len(applications)
         }), 200
     except Exception as e:
