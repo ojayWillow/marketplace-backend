@@ -368,15 +368,29 @@ def get_task(task_id):
 
 
 @tasks_bp.route('', methods=['POST'])
-def create_task():
-    """Create a new task request."""
+@token_required
+def create_task(current_user_id):
+    """Create a new task request.
+    
+    Requires authentication. The creator_id is extracted from the JWT
+    token — any creator_id sent in the request body is ignored.
+    """
     try:
         data = request.get_json()
         
-        logger.info(f'Creating task with data: {data}')
+        logger.info(f'Creating task for user {current_user_id} with data: {data}')
         
-        if not all(k in data for k in ['title', 'description', 'category', 'creator_id', 'latitude', 'longitude', 'location']):
-            return jsonify({'error': 'Missing required fields'}), 400
+        # creator_id comes from JWT token, not from request body
+        if data.get('creator_id') and data['creator_id'] != current_user_id:
+            logger.warning(
+                f'create_task: body creator_id={data["creator_id"]} differs from '
+                f'JWT user_id={current_user_id} — using JWT user_id'
+            )
+        
+        required_fields = ['title', 'description', 'category', 'latitude', 'longitude', 'location']
+        if not all(k in data for k in required_fields):
+            missing = [k for k in required_fields if k not in data]
+            return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
         
         deadline = None
         if data.get('deadline'):
@@ -390,7 +404,7 @@ def create_task():
         if difficulty not in ['easy', 'medium', 'hard']:
             return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
         
-        # Create task with difficulty field
+        # Create task — creator_id from JWT, not request body
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
@@ -398,7 +412,7 @@ def create_task():
             location=data['location'],
             latitude=data['latitude'],
             longitude=data['longitude'],
-            creator_id=data['creator_id'],
+            creator_id=current_user_id,
             budget=data.get('budget'),
             difficulty=difficulty,
             deadline=deadline,
@@ -419,69 +433,4 @@ def create_task():
     except Exception as e:
         db.session.rollback()
         logger.error(f'Error creating task: {str(e)}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
-
-
-@tasks_bp.route('/<int:task_id>', methods=['PUT'])
-@token_required
-def update_task(current_user_id, task_id):
-    """Update an existing task (only creator can update, only if status is 'open')."""
-    try:
-        task = TaskRequest.query.get(task_id)
-        if not task:
-            return jsonify({'error': 'Task not found'}), 404
-        
-        if task.creator_id != current_user_id:
-            return jsonify({'error': 'Only the task creator can update this task'}), 403
-        
-        if task.status != 'open':
-            return jsonify({'error': 'Only open tasks can be edited'}), 400
-        
-        data = request.get_json()
-        
-        if 'title' in data:
-            task.title = data['title']
-        if 'description' in data:
-            task.description = data['description']
-        if 'category' in data:
-            task.category = data['category']
-        if 'location' in data:
-            task.location = data['location']
-        if 'latitude' in data:
-            task.latitude = data['latitude']
-        if 'longitude' in data:
-            task.longitude = data['longitude']
-        if 'budget' in data:
-            task.budget = data['budget']
-        if 'priority' in data:
-            task.priority = data['priority']
-        if 'is_urgent' in data:
-            task.is_urgent = data['is_urgent']
-        if 'images' in data:
-            task.images = data['images']
-        
-        # Update difficulty if provided
-        if 'difficulty' in data:
-            if data['difficulty'] not in ['easy', 'medium', 'hard']:
-                return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
-            task.difficulty = data['difficulty']
-        
-        if 'deadline' in data:
-            if data['deadline']:
-                try:
-                    task.deadline = datetime.fromisoformat(data['deadline'])
-                except ValueError:
-                    return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
-            else:
-                task.deadline = None
-        
-        task.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Task updated successfully',
-            'task': task.to_dict()
-        }), 200
-    except Exception as e:
-        db.session.rollback()
         return jsonify({'error': str(e)}), 500
