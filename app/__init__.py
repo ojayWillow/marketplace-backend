@@ -80,14 +80,19 @@ def create_app(config_name=None):
     # The mobile app connects FROM the Railway URL, so we need to allow it
     socket_cors_origins = "*" if is_development else allowed_origins
     
-    # Initialize Socket.IO with gevent async mode
+    # Socket.IO async mode:
+    # - Production: 'gevent' (required by gunicorn gevent worker)
+    # - Testing: 'threading' (gevent not installed in test env)
+    socket_async_mode = 'threading' if config_name == 'testing' else 'gevent'
+    
+    # Initialize Socket.IO
     # IMPORTANT: Using polling transport ONLY because gunicorn's standard gevent worker
     # does not support WebSocket protocol. WebSocket would require geventwebsocket worker.
     # Polling is reliable and works perfectly for real-time messaging.
     socketio.init_app(app, 
                      cors_allowed_origins=socket_cors_origins,
-                     async_mode='gevent',
-                     logger=True,
+                     async_mode=socket_async_mode,
+                     logger=not app.config.get('TESTING', False),
                      engineio_logger=False,
                      ping_timeout=60,
                      ping_interval=25,
@@ -126,34 +131,44 @@ def create_app(config_name=None):
                 print("[STARTUP] Messages tables created manually")
             
             # MIGRATION: Add attachment columns to messages table if they don't exist
-            try:
+            # Skip for SQLite (testing) since db.create_all() handles it
+            if not app.config.get('TESTING', False):
+                try:
+                    columns = [col['name'] for col in inspector.get_columns('messages')]
+                    print(f"[STARTUP] Messages table columns: {columns}")
+                    
+                    if 'attachment_url' not in columns:
+                        print("[STARTUP] Adding attachment_url column to messages table...")
+                        db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_url TEXT'))
+                        db.session.commit()
+                        print("[STARTUP] ✓ Added attachment_url column")
+                    
+                    if 'attachment_type' not in columns:
+                        print("[STARTUP] Adding attachment_type column to messages table...")
+                        db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_type VARCHAR(20)'))
+                        db.session.commit()
+                        print("[STARTUP] ✓ Added attachment_type column")
+                        
+                except Exception as migration_error:
+                    print(f"[STARTUP] Migration error: {migration_error}")
+                    import traceback
+                    traceback.print_exc()
+            else:
                 columns = [col['name'] for col in inspector.get_columns('messages')]
                 print(f"[STARTUP] Messages table columns: {columns}")
-                
-                if 'attachment_url' not in columns:
-                    print("[STARTUP] Adding attachment_url column to messages table...")
-                    db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_url TEXT'))
-                    db.session.commit()
-                    print("[STARTUP] ✓ Added attachment_url column")
-                
-                if 'attachment_type' not in columns:
-                    print("[STARTUP] Adding attachment_type column to messages table...")
-                    db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_type VARCHAR(20)'))
-                    db.session.commit()
-                    print("[STARTUP] ✓ Added attachment_type column")
-                    
-            except Exception as migration_error:
-                print(f"[STARTUP] Migration error: {migration_error}")
-                import traceback
-                traceback.print_exc()
             
             # Add unique constraint for task applications (prevent duplicate applications)
-            try:
-                db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS unique_task_application ON task_applications (task_id, applicant_id)'))
-                db.session.commit()
+            # Note: TaskApplication model already defines this via __table_args__,
+            # so db.create_all() handles it. This is just a safety net for production.
+            if not app.config.get('TESTING', False):
+                try:
+                    db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS unique_task_application ON task_applications (task_id, applicant_id)'))
+                    db.session.commit()
+                    print("[STARTUP] Unique constraints created successfully")
+                except Exception as e:
+                    print(f"[STARTUP] Constraint note: {e}")
+            else:
                 print("[STARTUP] Unique constraints created successfully")
-            except Exception as e:
-                print(f"[STARTUP] Constraint note: {e}")
                 
         except Exception as e:
             print(f"[STARTUP] Database initialization error: {e}")
