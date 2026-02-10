@@ -27,13 +27,16 @@ def app():
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-testing'
 
     app = create_app('testing')
-    app.config.update({
-        'TESTING': True,
-        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
-        'JWT_SECRET_KEY': 'test-secret-key-for-testing',
-        'WTF_CSRF_ENABLED': False,
-    })
+
+    # Debug: verify routes are registered
+    rules = [rule.rule for rule in app.url_map.iter_rules()]
+    api_routes = [r for r in rules if r.startswith('/api/')]
+    print(f"\n[TEST SETUP] Registered API routes: {len(api_routes)}")
+    if len(api_routes) < 5:
+        print("[TEST SETUP] WARNING: Very few API routes registered!")
+        print(f"[TEST SETUP] All routes: {sorted(rules)}")
+    else:
+        print(f"[TEST SETUP] Sample routes: {sorted(api_routes)[:10]}")
 
     with app.app_context():
         db.create_all()
@@ -105,7 +108,19 @@ def _get_token(client, email, password):
         'password': password,
     })
     data = resp.get_json()
-    return data.get('access_token') or data.get('token')
+    if data is None:
+        raise RuntimeError(
+            f"Login failed: status={resp.status_code}, "
+            f"data={resp.data[:200]}. "
+            f"Routes may not be registered — check that all packages "
+            f"from requirements.txt are installed (pip install -r requirements-test.txt)"
+        )
+    token = data.get('access_token') or data.get('token')
+    if not token:
+        raise RuntimeError(
+            f"Login returned no token: status={resp.status_code}, body={data}"
+        )
+    return token
 
 
 @pytest.fixture
