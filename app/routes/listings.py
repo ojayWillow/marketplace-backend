@@ -3,34 +3,19 @@
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Listing, User
+from app.utils import token_required
 from datetime import datetime
-import os
-import jwt
-from functools import wraps
 
 listings_bp = Blueprint('listings', __name__)
 
-# Use the same key as Flask-JWT-Extended configuration
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = token.split(' ')[1]
-            data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-            current_user_id = data['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Token is invalid'}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
+# Fields that can be set when creating/updating a listing
+UPDATEABLE_FIELDS = [
+    'title', 'description', 'category', 'subcategory', 'price',
+    'location', 'latitude', 'longitude', 'images', 'contact_info',
+    'condition', 'is_negotiable', 'status'
+]
+
 
 @listings_bp.route('', methods=['GET'])
 def get_listings():
@@ -46,7 +31,6 @@ def get_listings():
         if category:
             query = query.filter_by(category=category)
         
-        # Order by newest first
         query = query.order_by(Listing.created_at.desc())
         
         listings = query.paginate(page=page, per_page=per_page)
@@ -55,6 +39,7 @@ def get_listings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @listings_bp.route('/my', methods=['GET'])
 @token_required
 def get_my_listings(current_user_id):
@@ -62,15 +47,13 @@ def get_my_listings(current_user_id):
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
-        status = request.args.get('status')  # Optional filter by status
+        status = request.args.get('status')
         
         query = Listing.query.filter_by(seller_id=current_user_id)
         
-        # Filter by status if provided, otherwise return all
         if status:
             query = query.filter_by(status=status)
         
-        # Order by newest first
         query = query.order_by(Listing.created_at.desc())
         
         listings = query.paginate(page=page, per_page=per_page)
@@ -89,7 +72,6 @@ def get_my_listings(current_user_id):
 def get_user_listings(user_id):
     """Get active listings by a specific user (public endpoint for profile view)."""
     try:
-        # Check if user exists
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
@@ -97,7 +79,6 @@ def get_user_listings(user_id):
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         
-        # Get only active listings for this user
         query = Listing.query.filter_by(
             seller_id=user_id,
             status='active'
@@ -126,10 +107,10 @@ def get_listing(listing_id):
         listing.views_count += 1
         db.session.commit()
         
-        # Include seller details for individual listing view
         return jsonify(listing.to_dict(include_seller_details=True)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 @listings_bp.route('', methods=['POST'])
 @token_required
@@ -168,24 +149,29 @@ def create_listing(current_user_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 @listings_bp.route('/<int:listing_id>', methods=['PUT'])
 @token_required
 def update_listing(current_user_id, listing_id):
-    """Update an existing listing."""
+    """Update an existing listing.
+    
+    Uses an explicit allowlist of fields to prevent attackers from
+    setting protected attributes like views_count or seller_id.
+    """
     try:
         listing = Listing.query.get(listing_id)
         if not listing:
             return jsonify({'error': 'Listing not found'}), 404
         
-        # Check ownership
         if listing.seller_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
         data = request.get_json()
         
-        for key, value in data.items():
-            if hasattr(listing, key) and key not in ['id', 'seller_id', 'created_at']:
-                setattr(listing, key, value)
+        # Allowlist: only these fields can be updated
+        for field in UPDATEABLE_FIELDS:
+            if field in data:
+                setattr(listing, field, data[field])
         
         listing.updated_at = datetime.utcnow()
         db.session.commit()
@@ -198,6 +184,7 @@ def update_listing(current_user_id, listing_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 @listings_bp.route('/<int:listing_id>', methods=['DELETE'])
 @token_required
 def delete_listing(current_user_id, listing_id):
@@ -207,7 +194,6 @@ def delete_listing(current_user_id, listing_id):
         if not listing:
             return jsonify({'error': 'Listing not found'}), 404
         
-        # Check ownership
         if listing.seller_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         

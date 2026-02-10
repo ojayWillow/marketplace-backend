@@ -8,7 +8,6 @@ import os
 admin_bp = Blueprint('admin', __name__)
 
 # Simple admin secret for protected operations
-# In production, use environment variable: ADMIN_SECRET
 ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'tirgus-admin-2026')
 
 
@@ -20,9 +19,14 @@ def check_admin_secret():
 
 @admin_bp.route('/init-db', methods=['GET', 'POST'])
 def init_database():
-    """Initialize database tables. Use with caution!"""
+    """Initialize database tables. Use with caution!
+    
+    Requires admin secret.
+    """
+    if not check_admin_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
     try:
-        # Create all tables
         db.create_all()
         
         return jsonify({
@@ -38,23 +42,25 @@ def init_database():
 
 @admin_bp.route('/migrate-db', methods=['GET', 'POST'])
 def migrate_database():
-    """Add missing columns to existing tables. Safe to run multiple times."""
+    """Add missing columns to existing tables. Safe to run multiple times.
+    
+    Requires admin secret.
+    """
+    if not check_admin_secret():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
     results = []
     
     try:
         # List of column migrations: (table, column, type, default)
         column_migrations = [
-            # User table - last_seen for online status
             ('users', 'last_seen', 'TIMESTAMP', None),
-            
-            # Offerings table - boost functionality
             ('offerings', 'is_boosted', 'BOOLEAN', 'FALSE'),
             ('offerings', 'boost_expires_at', 'TIMESTAMP', None),
         ]
         
         for table, column, col_type, default in column_migrations:
             try:
-                # Check if column exists
                 check_sql = f"""
                     SELECT column_name 
                     FROM information_schema.columns 
@@ -63,7 +69,6 @@ def migrate_database():
                 result = db.session.execute(db.text(check_sql)).fetchone()
                 
                 if result is None:
-                    # Column doesn't exist, add it
                     if default is not None:
                         alter_sql = f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default}"
                     else:
@@ -128,7 +133,6 @@ def migrate_database():
 def database_status():
     """Check database connection status."""
     try:
-        # Try to execute a simple query
         db.session.execute(db.text('SELECT 1'))
         return jsonify({
             'status': 'ok',
@@ -151,20 +155,11 @@ def seed_test_data():
     """Create sample tasks for testing.
     
     Requires admin secret in header or query param.
-    
-    Example:
-        POST /api/admin/seed-test-data?secret=tirgus-admin-2026
-        
-    Creates tasks distributed among users with these emails:
-        - dajsis@me.com
-        - win10keypro@gmail.com
-        - og.vitols@gmail.com
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized. Provide secret as query param or X-Admin-Secret header'}), 401
     
     try:
-        # Find users by email
         test_emails = ['dajsis@me.com', 'win10keypro@gmail.com', 'og.vitols@gmail.com']
         users = User.query.filter(User.email.in_(test_emails)).all()
         
@@ -177,13 +172,10 @@ def seed_test_data():
         user_map = {u.email: u for u in users}
         found_emails = list(user_map.keys())
         
-        # Riga coordinates (center)
         riga_lat = 56.9496
         riga_lng = 24.1052
         
-        # Sample tasks data - distributed across categories
         sample_tasks = [
-            # Delivery tasks
             {
                 'title': 'Grocery pickup from Rimi',
                 'description': 'Need someone to pick up groceries from Rimi Olimpia and deliver to Purvciems. List will be provided. About 10-15 items.',
@@ -208,8 +200,6 @@ def seed_test_data():
                 'is_urgent': True,
                 'deadline_days': 0,
             },
-            
-            # Cleaning tasks
             {
                 'title': 'Apartment deep cleaning before moving out',
                 'description': '2-room apartment needs thorough cleaning including windows, kitchen appliances, and bathroom. Approx 55 sqm. Cleaning supplies provided.',
@@ -234,8 +224,6 @@ def seed_test_data():
                 'is_urgent': False,
                 'deadline_days': 7,
             },
-            
-            # Repair tasks
             {
                 'title': 'Fix leaking kitchen faucet',
                 'description': 'Kitchen faucet is dripping constantly. Need someone with plumbing experience to repair or replace it. I have a replacement faucet if needed.',
@@ -260,8 +248,6 @@ def seed_test_data():
                 'is_urgent': False,
                 'deadline_days': 7,
             },
-            
-            # Moving tasks
             {
                 'title': 'Help moving furniture - 2 people needed',
                 'description': 'Moving from 3rd floor apartment (no elevator) to ground floor nearby. Sofa, bed, wardrobe, and boxes. Need 2 strong people for about 3 hours.',
@@ -274,8 +260,6 @@ def seed_test_data():
                 'is_urgent': False,
                 'deadline_days': 4,
             },
-            
-            # Tutoring tasks
             {
                 'title': 'Math tutoring for 9th grader',
                 'description': 'Looking for math tutor for my son preparing for exams. Need help with algebra and geometry. 2 sessions per week, 1.5 hours each.',
@@ -288,8 +272,6 @@ def seed_test_data():
                 'is_urgent': False,
                 'deadline_days': 14,
             },
-            
-            # Other tasks
             {
                 'title': 'Dog walking - 2 weeks while on vacation',
                 'description': 'Need someone to walk my friendly Labrador twice daily (morning and evening) while I am away. He is well-trained and loves people. Keys will be provided.',
@@ -307,10 +289,8 @@ def seed_test_data():
         created_tasks = []
         
         for i, task_data in enumerate(sample_tasks):
-            # Distribute tasks among available users (round-robin)
             creator = users[i % len(users)]
             
-            # Calculate deadline
             deadline = None
             if task_data.get('deadline_days') is not None:
                 deadline = datetime.utcnow() + timedelta(days=task_data['deadline_days'])
@@ -360,9 +340,7 @@ def seed_test_data():
 def clear_all_tasks():
     """Delete ALL tasks from the database.
     
-    ⚠️  CAUTION: This will permanently delete all tasks!
-    
-    Requires admin secret in header or query param.
+    Requires admin secret.
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized'}), 401
@@ -402,22 +380,12 @@ def clear_all_tasks():
 def delete_all_users():
     """Delete ALL users from the database.
     
-    ⚠️  CAUTION: This will permanently delete all user accounts!
-    
-    Requires admin secret in header or query param.
-    
-    Example:
-        DELETE /api/admin/users/delete-all?secret=tirgus-admin-2026
-        
-        or with header:
-        DELETE /api/admin/users/delete-all
-        X-Admin-Secret: tirgus-admin-2026
+    Requires admin secret.
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        # Count users before deletion
         user_count = User.query.count()
         
         if user_count == 0:
@@ -427,7 +395,6 @@ def delete_all_users():
                 'deleted_count': 0
             }), 200
         
-        # Get some info about users for logging
         users_info = []
         for user in User.query.limit(10).all():
             users_info.append({
@@ -436,7 +403,6 @@ def delete_all_users():
                 'phone': user.phone
             })
         
-        # Delete all users
         User.query.delete()
         db.session.commit()
         
@@ -444,7 +410,7 @@ def delete_all_users():
             'status': 'success',
             'message': f'Successfully deleted all {user_count} users',
             'deleted_count': user_count,
-            'sample_deleted_users': users_info  # Show first 10 for confirmation
+            'sample_deleted_users': users_info
         }), 200
         
     except Exception as e:
@@ -459,13 +425,12 @@ def delete_all_users():
 def get_user_by_phone(phone):
     """Get user details by phone number.
     
-    Requires admin secret in header or query param.
+    Requires admin secret.
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        # Normalize phone - ensure it has + prefix
         normalized_phone = phone if phone.startswith('+') else f'+{phone}'
         
         user = User.query.filter_by(phone=normalized_phone).first()
@@ -500,20 +465,12 @@ def get_user_by_phone(phone):
 def delete_user_by_phone(phone):
     """Delete a user by their phone number.
     
-    Requires admin secret in header or query param.
-    
-    Example:
-        DELETE /api/admin/user/by-phone/+37125953807?secret=your-secret
-        
-        or with header:
-        DELETE /api/admin/user/by-phone/+37125953807
-        X-Admin-Secret: your-secret
+    Requires admin secret.
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        # Normalize phone - ensure it has + prefix
         normalized_phone = phone if phone.startswith('+') else f'+{phone}'
         
         user = User.query.filter_by(phone=normalized_phone).first()
@@ -524,7 +481,6 @@ def delete_user_by_phone(phone):
                 'message': f'No user found with phone: {normalized_phone}'
             }), 404
         
-        # Store user info for response
         user_info = {
             'id': user.id,
             'username': user.username,
@@ -532,7 +488,6 @@ def delete_user_by_phone(phone):
             'phone': user.phone
         }
         
-        # Delete the user
         db.session.delete(user)
         db.session.commit()
         
@@ -554,7 +509,7 @@ def delete_user_by_phone(phone):
 def delete_user_by_id(user_id):
     """Delete a user by their ID.
     
-    Requires admin secret in header or query param.
+    Requires admin secret.
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized'}), 401
@@ -568,7 +523,6 @@ def delete_user_by_id(user_id):
                 'message': f'No user found with ID: {user_id}'
             }), 404
         
-        # Store user info for response
         user_info = {
             'id': user.id,
             'username': user.username,
@@ -576,7 +530,6 @@ def delete_user_by_id(user_id):
             'phone': user.phone
         }
         
-        # Delete the user
         db.session.delete(user)
         db.session.commit()
         
@@ -598,7 +551,7 @@ def delete_user_by_id(user_id):
 def list_all_users():
     """List all users in the database.
     
-    Requires admin secret in header or query param.
+    Requires admin secret.
     """
     if not check_admin_secret():
         return jsonify({'error': 'Unauthorized'}), 401

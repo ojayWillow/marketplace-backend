@@ -8,6 +8,7 @@ Users can only review each other after:
 
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import joinedload
+from sqlalchemy import func, case
 from app import db
 from app.models import Review, User, Listing, TaskRequest
 from app.utils import token_required, token_optional
@@ -44,19 +45,16 @@ def build_review_response(review):
 def get_reviews():
     """Get all reviews with optional filtering and pagination."""
     try:
-        # Pagination
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
-        per_page = min(per_page, 100)  # Cap at 100
+        per_page = min(per_page, 100)
         
-        # Optional filters
         reviewer_id = request.args.get('reviewer_id')
         reviewed_user_id = request.args.get('reviewed_user_id')
         listing_id = request.args.get('listing_id')
         task_id = request.args.get('task_id')
         rating_min = request.args.get('rating_min', type=int)
         
-        # Build query with eager loading to avoid N+1
         query = Review.query.options(
             joinedload(Review.reviewer),
             joinedload(Review.reviewed)
@@ -73,7 +71,6 @@ def get_reviews():
         if rating_min:
             query = query.filter(Review.rating >= rating_min)
         
-        # Paginate
         paginated = query.order_by(Review.created_at.desc()).paginate(
             page=page, per_page=per_page, error_out=False
         )
@@ -99,7 +96,6 @@ def get_task_reviews(task_id):
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
-        # Eager load reviewer and reviewed to avoid N+1 queries
         reviews = Review.query.options(
             joinedload(Review.reviewer),
             joinedload(Review.reviewed)
@@ -124,7 +120,6 @@ def can_review_task(current_user_id, task_id):
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
-        # Task must be completed
         if task.status != 'completed':
             return jsonify({
                 'can_review': False,
@@ -140,7 +135,6 @@ def can_review_task(current_user_id, task_id):
                 'reason': 'You are not involved in this task'
             }), 200
         
-        # Check if user already left a review
         existing_review = Review.query.filter_by(
             task_id=task_id,
             reviewer_id=current_user_id
@@ -153,15 +147,12 @@ def can_review_task(current_user_id, task_id):
                 'existing_review': existing_review.to_dict()
             }), 200
         
-        # Determine who the user can review
         if is_creator:
-            # Task creator can review the worker
             reviewee = User.query.get(task.assigned_to_id)
-            review_type = 'client_review'  # Client reviewing worker
+            review_type = 'client_review'
         else:
-            # Worker can review the task creator
             reviewee = User.query.get(task.creator_id)
-            review_type = 'worker_review'  # Worker reviewing client
+            review_type = 'worker_review'
         
         return jsonify({
             'can_review': True,
@@ -187,7 +178,6 @@ def create_task_review(current_user_id, task_id):
         if not task:
             return jsonify({'error': 'Task not found'}), 404
         
-        # Task must be completed
         if task.status != 'completed':
             return jsonify({'error': 'Task must be completed before leaving reviews'}), 400
         
@@ -197,7 +187,6 @@ def create_task_review(current_user_id, task_id):
         if not is_creator and not is_worker:
             return jsonify({'error': 'You are not involved in this task'}), 403
         
-        # Check if user already left a review
         existing_review = Review.query.filter_by(
             task_id=task_id,
             reviewer_id=current_user_id
@@ -208,14 +197,12 @@ def create_task_review(current_user_id, task_id):
         
         data = request.get_json()
         
-        # Validate rating
         if not data or 'rating' not in data:
             return jsonify({'error': 'Rating is required'}), 400
         
         if not (1 <= data['rating'] <= 5):
             return jsonify({'error': 'Rating must be between 1 and 5'}), 400
         
-        # Validate content - now required with minimum length
         content = data.get('content', '').strip()
         if not content:
             return jsonify({'error': 'Please write a review to share your experience'}), 400
@@ -227,7 +214,6 @@ def create_task_review(current_user_id, task_id):
                 'current_length': len(content)
             }), 400
         
-        # Determine review type and reviewee
         if is_creator:
             reviewed_user_id = task.assigned_to_id
             review_type = 'client_review'
@@ -271,16 +257,36 @@ def create_task_review(current_user_id, task_id):
 
 @reviews_bp.route('/user/<int:user_id>/stats', methods=['GET'])
 def get_user_review_stats(user_id):
-    """Get review statistics for a user."""
+    """Get review statistics for a user.
+    
+    Uses SQL aggregate queries instead of loading all Review objects
+    into memory. 2 queries total regardless of review count:
+    1. Overall + per-rating breakdown
+    2. Per-review-type breakdown
+    """
     try:
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Get all reviews received by user
-        reviews = Review.query.filter_by(reviewed_user_id=user_id).all()
+        # Query 1: Overall stats + rating breakdown in ONE query
+        # Uses conditional aggregation to get count per rating bucket
+        stats = db.session.query(
+            func.count(Review.id).label('total'),
+            func.avg(Review.rating).label('avg_rating'),
+            func.sum(case((func.round(Review.rating) == 1, 1), else_=0)).label('r1'),
+            func.sum(case((func.round(Review.rating) == 2, 1), else_=0)).label('r2'),
+            func.sum(case((func.round(Review.rating) == 3, 1), else_=0)).label('r3'),
+            func.sum(case((func.round(Review.rating) == 4, 1), else_=0)).label('r4'),
+            func.sum(case((func.round(Review.rating) == 5, 1), else_=0)).label('r5'),
+        ).filter(
+            Review.reviewed_user_id == user_id
+        ).first()
         
-        if not reviews:
+        total = stats.total or 0
+        avg_rating = float(stats.avg_rating) if stats.avg_rating else None
+        
+        if total == 0:
             return jsonify({
                 'user_id': user_id,
                 'total_reviews': 0,
@@ -290,35 +296,41 @@ def get_user_review_stats(user_id):
                 'as_client': {'count': 0, 'average': None}
             }), 200
         
-        total = len(reviews)
-        avg = sum(r.rating for r in reviews) / total
+        breakdown = {
+            1: int(stats.r1 or 0),
+            2: int(stats.r2 or 0),
+            3: int(stats.r3 or 0),
+            4: int(stats.r4 or 0),
+            5: int(stats.r5 or 0),
+        }
         
-        # Breakdown by rating
-        breakdown = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        for r in reviews:
-            rating_int = int(round(r.rating))
-            if rating_int in breakdown:
-                breakdown[rating_int] += 1
+        # Query 2: Per review-type stats (as worker vs as client)
+        type_stats = db.session.query(
+            Review.review_type,
+            func.count(Review.id).label('count'),
+            func.avg(Review.rating).label('avg_rating')
+        ).filter(
+            Review.reviewed_user_id == user_id
+        ).group_by(Review.review_type).all()
         
-        # Split by review type (as worker vs as client)
-        worker_reviews = [r for r in reviews if r.review_type == 'client_review']
-        client_reviews = [r for r in reviews if r.review_type == 'worker_review']
+        type_map = {row.review_type: row for row in type_stats}
         
-        worker_avg = sum(r.rating for r in worker_reviews) / len(worker_reviews) if worker_reviews else None
-        client_avg = sum(r.rating for r in client_reviews) / len(client_reviews) if client_reviews else None
+        # client_review = reviews left by clients about this worker
+        worker_row = type_map.get('client_review')
+        client_row = type_map.get('worker_review')
         
         return jsonify({
             'user_id': user_id,
             'total_reviews': total,
-            'average_rating': round(avg, 1),
+            'average_rating': round(avg_rating, 1),
             'rating_breakdown': breakdown,
             'as_worker': {
-                'count': len(worker_reviews),
-                'average': round(worker_avg, 1) if worker_avg else None
+                'count': worker_row.count if worker_row else 0,
+                'average': round(float(worker_row.avg_rating), 1) if worker_row and worker_row.avg_rating else None
             },
             'as_client': {
-                'count': len(client_reviews),
-                'average': round(client_avg, 1) if client_avg else None
+                'count': client_row.count if client_row else 0,
+                'average': round(float(client_row.avg_rating), 1) if client_row and client_row.avg_rating else None
             }
         }), 200
     except Exception as e:
@@ -328,12 +340,7 @@ def get_user_review_stats(user_id):
 @reviews_bp.route('/can-review-user/<int:user_id>', methods=['GET'])
 @token_required
 def can_review_user(current_user_id, user_id):
-    """
-    Check if current user can review another user.
-    Returns list of completed transactions that allow reviewing.
-    
-    Reviews can only be left after completing a transaction together.
-    """
+    """Check if current user can review another user."""
     try:
         if current_user_id == user_id:
             return jsonify({
@@ -342,15 +349,12 @@ def can_review_user(current_user_id, user_id):
                 'reviewable_transactions': []
             }), 200
         
-        # Find completed tasks where both users were involved
-        # Case 1: Current user was creator, other user was worker
         tasks_as_creator = TaskRequest.query.filter(
             TaskRequest.creator_id == current_user_id,
             TaskRequest.assigned_to_id == user_id,
             TaskRequest.status == 'completed'
         ).all()
         
-        # Case 2: Current user was worker, other user was creator
         tasks_as_worker = TaskRequest.query.filter(
             TaskRequest.creator_id == user_id,
             TaskRequest.assigned_to_id == current_user_id,
@@ -359,7 +363,6 @@ def can_review_user(current_user_id, user_id):
         
         reviewable_transactions = []
         
-        # Check each task if already reviewed
         for task in tasks_as_creator:
             existing_review = Review.query.filter_by(
                 task_id=task.id,
@@ -392,8 +395,6 @@ def can_review_user(current_user_id, user_id):
                     'review_type': 'worker_review'
                 })
         
-        # TODO: Add listing transactions when implemented
-        
         return jsonify({
             'can_review': len(reviewable_transactions) > 0,
             'reason': 'No completed transactions with this user' if not reviewable_transactions else None,
@@ -404,17 +405,10 @@ def can_review_user(current_user_id, user_id):
         return jsonify({'error': str(e)}), 500
 
 
-# REMOVED: Generic POST /api/reviews endpoint
-# Reviews must now go through specific transaction endpoints:
-# - POST /api/reviews/task/<task_id> for task reviews
-# - POST /api/reviews/listing/<listing_id> for listing reviews (TODO)
-
-
 @reviews_bp.route('/<int:review_id>', methods=['GET'])
 def get_review(review_id):
     """Get a specific review by ID."""
     try:
-        # Eager load reviewer to avoid extra query
         review = Review.query.options(
             joinedload(Review.reviewer)
         ).get(review_id)
@@ -447,9 +441,8 @@ def update_review(current_user_id, review_id):
         if review.reviewer_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
-        # Check if review is within edit window (24 hours)
         time_since_creation = datetime.utcnow() - review.created_at
-        if time_since_creation.total_seconds() > 86400:  # 24 hours
+        if time_since_creation.total_seconds() > 86400:
             return jsonify({'error': 'Reviews can only be edited within 24 hours of creation'}), 400
         
         data = request.get_json()
@@ -490,9 +483,8 @@ def delete_review(current_user_id, review_id):
         if review.reviewer_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
-        # Check if review is within delete window (24 hours)
         time_since_creation = datetime.utcnow() - review.created_at
-        if time_since_creation.total_seconds() > 86400:  # 24 hours
+        if time_since_creation.total_seconds() > 86400:
             return jsonify({'error': 'Reviews can only be deleted within 24 hours of creation'}), 400
         
         db.session.delete(review)
