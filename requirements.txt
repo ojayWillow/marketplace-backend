@@ -8,7 +8,7 @@ python-socketio==5.11.4
 gevent>=24.10.1
 gevent-websocket>=0.10.1
 python-dotenv==1.0.0
-Werkzeug>=2.3.3
+Werkzeug>=2.3.3,<3.1
 stripe>=5.5.0
 python-dateutil==2.8.2
 gunicorn==22.0.0
