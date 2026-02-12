@@ -11,7 +11,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import func, case
 from app import db
 from app.models import Review, User, Listing, TaskRequest
-from app.utils import token_required, token_optional
+from app.utils import token_required, token_optional, get_display_name, send_push_safe
 from datetime import datetime
 
 reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
@@ -232,6 +232,35 @@ def create_task_review(current_user_id, task_id):
         
         db.session.add(review)
         db.session.commit()
+        
+        # --- Notify the reviewed user ---
+        reviewer = User.query.get(current_user_id)
+        reviewer_name = get_display_name(reviewer)
+        task_title = task.title
+        rating = data['rating']
+        
+        # Push notification
+        try:
+            from app.services.push_notifications import notify_new_review as push_notify_review
+            send_push_safe(
+                push_notify_review,
+                user_id=reviewed_user_id,
+                reviewer_name=reviewer_name,
+                task_title=task_title,
+                task_id=task_id,
+                rating=rating
+            )
+        except Exception as push_err:
+            print(f"Push review notification skipped (non-critical): {push_err}")
+        
+        # In-app notification
+        try:
+            from app.routes.notifications import notify_new_review as inapp_notify_review
+            inapp_notify_review(reviewed_user_id, reviewer_name, task_title, task_id, rating)
+            db.session.commit()
+        except Exception as notify_error:
+            db.session.rollback()
+            print(f"In-app review notification skipped (non-critical): {notify_error}")
         
         # Reload with relationships for response
         review = Review.query.options(
