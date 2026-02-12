@@ -1,10 +1,10 @@
 """Admin routes for platform management."""
 from flask import Blueprint, jsonify, request
 from app import db
-from app.models import User, TaskRequest, Dispute, Notification, NotificationType, Offering, Review
+from app.models import User, TaskRequest, Dispute, Notification, NotificationType, Offering, Review, TaskApplication
 from app.utils.auth import token_required
 from datetime import datetime, timedelta
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, cast, Date
 import os
 
 admin_bp = Blueprint('admin', __name__)
@@ -142,7 +142,7 @@ def list_users_admin(current_user_id):
             
             # Count jobs (tasks created) and offerings
             jobs_count = TaskRequest.query.filter_by(creator_id=u.id).count()
-            offerings_count = Offering.query.filter_by(user_id=u.id).count()
+            offerings_count = Offering.query.filter_by(creator_id=u.id).count()
             
             users_data.append({
                 'id': u.id,
@@ -227,6 +227,333 @@ def verify_user(current_user_id, user_id):
         return jsonify({'message': f'User {user.username} verified', 'user_id': user_id}), 200
     except Exception as e:
         db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# JOBS (TASKS) MANAGEMENT
+# ============================================================================
+
+@admin_bp.route('/jobs', methods=['GET'])
+@admin_required
+def list_jobs_admin(current_user_id):
+    """List all jobs/tasks with pagination, search, and status filter."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        search = request.args.get('search', '').strip()
+        status = request.args.get('status', 'all')
+        
+        query = TaskRequest.query
+        
+        # Status filter
+        if status and status != 'all':
+            query = query.filter_by(status=status)
+        
+        # Search
+        if search:
+            search_term = f'%{search}%'
+            query = query.filter(
+                or_(
+                    TaskRequest.title.ilike(search_term),
+                    TaskRequest.location.ilike(search_term),
+                    TaskRequest.description.ilike(search_term),
+                )
+            )
+        
+        # Order by newest first
+        query = query.order_by(TaskRequest.created_at.desc())
+        
+        total = query.count()
+        tasks = query.offset((page - 1) * per_page).limit(per_page).all()
+        
+        # Batch load creator info
+        creator_ids = list({t.creator_id for t in tasks})
+        creators = {u.id: u for u in User.query.filter(User.id.in_(creator_ids)).all()} if creator_ids else {}
+        
+        # Batch load application counts
+        task_ids = [t.id for t in tasks]
+        app_counts = {}
+        if task_ids:
+            counts = db.session.query(
+                TaskApplication.task_id,
+                func.count(TaskApplication.id)
+            ).filter(
+                TaskApplication.task_id.in_(task_ids)
+            ).group_by(TaskApplication.task_id).all()
+            app_counts = {tid: cnt for tid, cnt in counts}
+        
+        jobs_data = []
+        for t in tasks:
+            creator = creators.get(t.creator_id)
+            creator_name = 'Unknown'
+            if creator:
+                if creator.first_name and creator.last_name:
+                    creator_name = f"{creator.first_name} {creator.last_name}"
+                else:
+                    creator_name = creator.username
+            
+            jobs_data.append({
+                'id': t.id,
+                'title': t.title,
+                'category': t.category,
+                'status': t.status,
+                'budget': t.budget,
+                'location': t.location,
+                'creator_name': creator_name,
+                'creator_id': t.creator_id,
+                'created_at': t.created_at.isoformat(),
+                'applications_count': app_counts.get(t.id, 0),
+                'is_urgent': t.is_urgent,
+            })
+        
+        return jsonify({
+            'jobs': jobs_data,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'totalPages': (total + per_page - 1) // per_page,
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/jobs/<int:job_id>', methods=['DELETE'])
+@admin_required
+def delete_job_admin(current_user_id, job_id):
+    """Delete a job/task as admin."""
+    try:
+        task = TaskRequest.query.get(job_id)
+        if not task:
+            return jsonify({'error': 'Job not found'}), 404
+        
+        # Delete related applications first
+        TaskApplication.query.filter_by(task_id=job_id).delete()
+        
+        db.session.delete(task)
+        db.session.commit()
+        
+        return jsonify({'message': 'Job deleted successfully', 'job_id': job_id}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# OFFERINGS MANAGEMENT
+# ============================================================================
+
+@admin_bp.route('/offerings', methods=['GET'])
+@admin_required
+def list_offerings_admin(current_user_id):
+    """List all offerings with pagination, search, and status filter."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        search = request.args.get('search', '').strip()
+        status = request.args.get('status', 'all')
+        
+        query = Offering.query
+        
+        # Status filter
+        if status and status != 'all':
+            query = query.filter_by(status=status)
+        
+        # Search
+        if search:
+            search_term = f'%{search}%'
+            query = query.filter(
+                or_(
+                    Offering.title.ilike(search_term),
+                    Offering.location.ilike(search_term),
+                    Offering.description.ilike(search_term),
+                )
+            )
+        
+        # Order by newest first
+        query = query.order_by(Offering.created_at.desc())
+        
+        total = query.count()
+        offerings = query.offset((page - 1) * per_page).limit(per_page).all()
+        
+        # Batch load creator info and review stats
+        creator_ids = list({o.creator_id for o in offerings})
+        creators = {u.id: u for u in User.query.filter(User.id.in_(creator_ids)).all()} if creator_ids else {}
+        review_stats = User.get_review_stats_batch(creator_ids) if creator_ids else {}
+        
+        offerings_data = []
+        for o in offerings:
+            creator = creators.get(o.creator_id)
+            creator_name = 'Unknown'
+            if creator:
+                if creator.first_name and creator.last_name:
+                    creator_name = f"{creator.first_name} {creator.last_name}"
+                else:
+                    creator_name = creator.username
+            
+            rating, _ = review_stats.get(o.creator_id, (0, 0))
+            
+            offerings_data.append({
+                'id': o.id,
+                'title': o.title,
+                'category': o.category,
+                'status': o.status,
+                'price': o.price,
+                'price_type': o.price_type,
+                'location': o.location,
+                'creator_name': creator_name,
+                'creator_id': o.creator_id,
+                'created_at': o.created_at.isoformat(),
+                'rating': rating or 0,
+            })
+        
+        return jsonify({
+            'offerings': offerings_data,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'totalPages': (total + per_page - 1) // per_page,
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/offerings/<int:offering_id>', methods=['DELETE'])
+@admin_required
+def delete_offering_admin(current_user_id, offering_id):
+    """Delete an offering as admin."""
+    try:
+        offering = Offering.query.get(offering_id)
+        if not offering:
+            return jsonify({'error': 'Offering not found'}), 404
+        
+        db.session.delete(offering)
+        db.session.commit()
+        
+        return jsonify({'message': 'Offering deleted successfully', 'offering_id': offering_id}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# ANALYTICS
+# ============================================================================
+
+@admin_bp.route('/analytics', methods=['GET'])
+@admin_required
+def get_analytics(current_user_id):
+    """Get real computed analytics for the admin dashboard."""
+    try:
+        range_param = request.args.get('range', '30d')
+        
+        # Determine date range
+        range_days = {'7d': 7, '30d': 30, '90d': 90, '1y': 365}.get(range_param, 30)
+        start_date = datetime.utcnow() - timedelta(days=range_days)
+        
+        # --- Metrics ---
+        total_users = User.query.count()
+        new_users = User.query.filter(User.created_at >= start_date).count()
+        total_jobs = TaskRequest.query.count()
+        completed_jobs = TaskRequest.query.filter_by(status='completed').count()
+        completion_rate = round((completed_jobs / total_jobs * 100), 1) if total_jobs > 0 else 0
+        
+        avg_budget = db.session.query(func.avg(TaskRequest.budget)).filter(
+            TaskRequest.budget.isnot(None)
+        ).scalar() or 0
+        avg_budget = round(float(avg_budget), 2)
+        
+        total_volume = db.session.query(func.sum(TaskRequest.budget)).filter(
+            TaskRequest.status == 'completed',
+            TaskRequest.budget.isnot(None)
+        ).scalar() or 0
+        total_volume = round(float(total_volume), 2)
+        
+        # --- User Growth (daily new signups over the range) ---
+        # Group by date
+        user_growth_raw = db.session.query(
+            cast(User.created_at, Date).label('date'),
+            func.count(User.id)
+        ).filter(
+            User.created_at >= start_date
+        ).group_by(
+            cast(User.created_at, Date)
+        ).order_by(
+            cast(User.created_at, Date)
+        ).all()
+        
+        # Build cumulative growth
+        base_users = User.query.filter(User.created_at < start_date).count()
+        user_growth = []
+        running_total = base_users
+        for date_val, count in user_growth_raw:
+            running_total += count
+            user_growth.append({
+                'label': date_val.strftime('%b %d'),
+                'value': running_total
+            })
+        
+        # If no data points, add at least current total
+        if not user_growth:
+            user_growth.append({'label': datetime.utcnow().strftime('%b %d'), 'value': total_users})
+        
+        # --- Jobs by Category ---
+        category_counts = db.session.query(
+            TaskRequest.category,
+            func.count(TaskRequest.id)
+        ).group_by(TaskRequest.category).order_by(
+            func.count(TaskRequest.id).desc()
+        ).limit(10).all()
+        
+        jobs_by_category = [
+            {'label': cat or 'Other', 'value': cnt}
+            for cat, cnt in category_counts
+        ]
+        
+        # --- Completion Data (status breakdown) ---
+        status_counts = db.session.query(
+            TaskRequest.status,
+            func.count(TaskRequest.id)
+        ).group_by(TaskRequest.status).all()
+        
+        status_map = {s: c for s, c in status_counts}
+        completion_data = [
+            {'label': 'Completed', 'value': status_map.get('completed', 0)},
+            {'label': 'In Progress', 'value': status_map.get('in_progress', 0) + status_map.get('assigned', 0) + status_map.get('open', 0)},
+            {'label': 'Cancelled', 'value': status_map.get('cancelled', 0)},
+        ]
+        
+        # --- Top Locations ---
+        location_counts = db.session.query(
+            TaskRequest.location,
+            func.count(TaskRequest.id)
+        ).filter(
+            TaskRequest.location.isnot(None),
+            TaskRequest.location != ''
+        ).group_by(TaskRequest.location).order_by(
+            func.count(TaskRequest.id).desc()
+        ).limit(8).all()
+        
+        top_locations = [
+            {'label': loc, 'value': cnt}
+            for loc, cnt in location_counts
+        ]
+        
+        return jsonify({
+            'metrics': {
+                'totalUsers': total_users,
+                'newUsers': new_users,
+                'totalJobs': total_jobs,
+                'completionRate': completion_rate,
+                'avgJobBudget': avg_budget,
+                'totalVolume': total_volume,
+            },
+            'userGrowth': user_growth,
+            'jobsByCategory': jobs_by_category,
+            'completionData': completion_data,
+            'topLocations': top_locations,
+        }), 200
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
