@@ -90,7 +90,9 @@ def mark_notifications_by_type(current_user_id):
     """Mark notifications as read by type.
     
     Body params:
-        - type: 'accepted_applications' | 'all'
+        - type: 'accepted_applications' | 'new_applications' | 'task_marked_done' |
+                'task_completed' | 'review_reminder' | 'task_disputed' |
+                'task_cancelled' | 'new_review' | 'all'
     """
     try:
         data = request.get_json() or {}
@@ -102,17 +104,21 @@ def mark_notifications_by_type(current_user_id):
             is_read=False
         )
         
-        # Filter by notification type if specified
-        if notification_type == 'accepted_applications':
-            query = query.filter_by(type=NotificationType.APPLICATION_ACCEPTED)
-        elif notification_type == 'new_applications':
-            query = query.filter_by(type=NotificationType.NEW_APPLICATION)
-        elif notification_type == 'task_marked_done':
-            query = query.filter_by(type=NotificationType.TASK_MARKED_DONE)
-        elif notification_type == 'task_completed':
-            query = query.filter_by(type=NotificationType.TASK_COMPLETED)
-        elif notification_type == 'review_reminder':
-            query = query.filter_by(type=NotificationType.REVIEW_REMINDER)
+        # Map request type names to NotificationType constants
+        type_map = {
+            'accepted_applications': NotificationType.APPLICATION_ACCEPTED,
+            'new_applications': NotificationType.NEW_APPLICATION,
+            'task_marked_done': NotificationType.TASK_MARKED_DONE,
+            'task_completed': NotificationType.TASK_COMPLETED,
+            'review_reminder': NotificationType.REVIEW_REMINDER,
+            'task_disputed': NotificationType.TASK_DISPUTED,
+            'task_cancelled': NotificationType.TASK_CANCELLED,
+            'new_review': NotificationType.NEW_REVIEW,
+            'application_rejected': NotificationType.APPLICATION_REJECTED,
+        }
+        
+        if notification_type in type_map:
+            query = query.filter_by(type=type_map[notification_type])
         # 'all' type marks all unread notifications
         
         updated_count = query.update({
@@ -335,4 +341,31 @@ def notify_task_disputed(user_id: int, task_title: str, task_id: int, is_creator
         related_type='task',
         related_id=task_id,
         data={'task_title': task_title, 'is_creator': is_creator}
+    )
+
+
+def notify_task_cancelled(user_id: int, task_title: str, task_id: int) -> Notification:
+    """Create notification when a task the user is involved in gets cancelled."""
+    return create_notification(
+        user_id=user_id,
+        notification_type=NotificationType.TASK_CANCELLED,
+        title='\u274c Task Cancelled',
+        message=f'The task "{task_title}" has been cancelled by the creator.',
+        related_type='task',
+        related_id=task_id,
+        data={'task_title': task_title}
+    )
+
+
+def notify_new_review(user_id: int, reviewer_name: str, task_title: str, task_id: int, rating: int) -> Notification:
+    """Create notification when someone leaves a review for you."""
+    stars = '\u2b50' * min(rating, 5)
+    return create_notification(
+        user_id=user_id,
+        notification_type=NotificationType.NEW_REVIEW,
+        title=f'{stars} New Review!',
+        message=f'{reviewer_name} left a {rating}-star review for "{task_title}".',
+        related_type='task',
+        related_id=task_id,
+        data={'reviewer_name': reviewer_name, 'task_title': task_title, 'rating': rating}
     )
