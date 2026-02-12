@@ -127,7 +127,6 @@ def create_dispute(current_user_id):
     
     # Create notification for the other party
     # NOTE: We store task_id in related_id (not dispute_id) so frontend can route to /task/{id}
-    # This is more robust as task page shows full context including dispute info
     notification = Notification(
         user_id=filed_against_id,
         type=NotificationType.TASK_DISPUTED,
@@ -136,6 +135,8 @@ def create_dispute(current_user_id):
         related_type='task',
         related_id=task_id
     )
+    # Set data dict so frontend can render localized notification with task_title
+    notification.set_data({'task_title': task.title})
     db.session.add(notification)
     
     db.session.commit()
@@ -237,7 +238,6 @@ def respond_to_dispute(current_user_id, dispute_id):
     dispute.status = 'under_review'
     
     # Notify the filer that a response was received
-    # Store task_id for consistent routing to task page
     notification = Notification(
         user_id=dispute.filed_by_id,
         type=NotificationType.TASK_DISPUTED,
@@ -246,6 +246,7 @@ def respond_to_dispute(current_user_id, dispute_id):
         related_type='task',
         related_id=dispute.task_id
     )
+    notification.set_data({'task_title': dispute.task.title})
     db.session.add(notification)
     
     db.session.commit()
@@ -308,7 +309,7 @@ def resolve_dispute(current_user_id, dispute_id):
         task.status = 'completed'
         task.completed_at = datetime.utcnow()
     
-    # Notify both parties
+    # Notify both parties about the resolution
     resolution_messages = {
         'refund': 'The dispute has been resolved with a full refund to the task creator.',
         'pay_worker': 'The dispute has been resolved in favor of the worker.',
@@ -325,6 +326,11 @@ def resolve_dispute(current_user_id, dispute_id):
             related_type='task',
             related_id=dispute.task_id
         )
+        notification.set_data({
+            'task_title': task.title,
+            'resolution': resolution,
+            'resolution_notes': resolution_notes,
+        })
         db.session.add(notification)
     
     db.session.commit()
