@@ -229,6 +229,50 @@ def notify_task_confirmed(worker_id: int, task_title: str, task_id: int):
     )
 
 
+def notify_task_disputed(user_id: int, task_title: str, task_id: int):
+    """
+    Send push notification when a task is disputed.
+    """
+    logger.info(f'[PUSH] notify_task_disputed called - user: {user_id}')
+    return send_push_notification(
+        user_id=user_id,
+        title='⚠️ Task Disputed',
+        body=f'A dispute has been raised for "{task_title}". Please check.',
+        url=f'/tasks/{task_id}',
+        tag=f'disputed-{task_id}'
+    )
+
+
+def notify_task_cancelled(user_id: int, task_title: str, task_id: int):
+    """
+    Send push notification when a task is cancelled by the creator.
+    """
+    logger.info(f'[PUSH] notify_task_cancelled called - user: {user_id}')
+    return send_push_notification(
+        user_id=user_id,
+        title='❌ Task Cancelled',
+        body=f'The task "{task_title}" has been cancelled.',
+        url=f'/tasks/{task_id}',
+        tag=f'cancelled-{task_id}'
+    )
+
+
+def notify_new_review(user_id: int, reviewer_name: str, task_title: str,
+                      task_id: int, rating: int):
+    """
+    Send push notification when someone leaves a review for you.
+    """
+    logger.info(f'[PUSH] notify_new_review called - user: {user_id}')
+    stars = '⭐' * min(rating, 5)
+    return send_push_notification(
+        user_id=user_id,
+        title=f'{stars} New Review!',
+        body=f'{reviewer_name} left a review for "{task_title}".',
+        url=f'/tasks/{task_id}',
+        tag=f'review-{task_id}'
+    )
+
+
 def notify_new_job_nearby(user_id: int, task_title: str, task_id: int, 
                           distance_km: float):
     """
