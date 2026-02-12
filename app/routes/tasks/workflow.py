@@ -86,6 +86,7 @@ def confirm_task_completion(current_user_id, task_id):
         worker_id = task.assigned_to_id
         task_title = task.title
         
+        # Push notification to worker: task confirmed
         send_push_safe(
             notify_task_confirmed,
             worker_id=worker_id,
@@ -93,9 +94,21 @@ def confirm_task_completion(current_user_id, task_id):
             task_id=task_id
         )
         
+        # In-app notifications
         try:
-            from app.routes.notifications import notify_task_completed as inapp_notify_completed
+            from app.routes.notifications import (
+                notify_task_completed as inapp_notify_completed,
+                notify_review_reminder
+            )
+            
+            # 1. Tell the worker the task is confirmed complete
             inapp_notify_completed(worker_id, task_title, task_id)
+            
+            # 2. Send review reminder to the worker (to review the creator)
+            creator = User.query.get(current_user_id)
+            creator_name = get_display_name(creator)
+            notify_review_reminder(worker_id, creator_name, task_title, task_id)
+            
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()

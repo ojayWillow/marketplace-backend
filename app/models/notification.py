@@ -84,3 +84,4 @@ class NotificationType:
     TASK_CANCELLED = 'task_cancelled'
     NEW_REVIEW = 'new_review'
     NEW_MESSAGE = 'new_message'
+    REVIEW_REMINDER = 'review_reminder'

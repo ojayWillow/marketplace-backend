@@ -111,6 +111,8 @@ def mark_notifications_by_type(current_user_id):
             query = query.filter_by(type=NotificationType.TASK_MARKED_DONE)
         elif notification_type == 'task_completed':
             query = query.filter_by(type=NotificationType.TASK_COMPLETED)
+        elif notification_type == 'review_reminder':
+            query = query.filter_by(type=NotificationType.REVIEW_REMINDER)
         # 'all' type marks all unread notifications
         
         updated_count = query.update({
@@ -302,6 +304,19 @@ def notify_task_completed(worker_id: int, task_title: str, task_id: int) -> Noti
         related_type='task',
         related_id=task_id,
         data={'task_title': task_title}
+    )
+
+
+def notify_review_reminder(user_id: int, other_party_name: str, task_title: str, task_id: int) -> Notification:
+    """Create notification prompting user to leave a review after task completion."""
+    return create_notification(
+        user_id=user_id,
+        notification_type=NotificationType.REVIEW_REMINDER,
+        title='\u2b50 Leave a Review',
+        message=f'"{task_title}" is complete! Take a moment to leave a review for {other_party_name}.',
+        related_type='task',
+        related_id=task_id,
+        data={'task_title': task_title, 'other_party_name': other_party_name}
     )
 
 
