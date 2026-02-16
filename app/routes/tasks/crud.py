@@ -434,3 +434,79 @@ def create_task(current_user_id):
         db.session.rollback()
         logger.error(f'Error creating task: {str(e)}', exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+@tasks_bp.route('/<int:task_id>', methods=['PUT'])
+@token_required
+def update_task(current_user_id, task_id):
+    """Update an existing task request.
+    
+    Requires authentication. Only the task creator can edit.
+    Only open tasks can be edited.
+    """
+    try:
+        task = TaskRequest.query.get(task_id)
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        if task.creator_id != current_user_id:
+            return jsonify({'error': 'Only the task creator can edit this task'}), 403
+        
+        if task.status != 'open':
+            return jsonify({'error': 'Only open tasks can be edited'}), 400
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        logger.info(f'Updating task {task_id} for user {current_user_id} with data: {data}')
+        
+        # Update allowed fields
+        if 'title' in data and data['title'].strip():
+            task.title = data['title'].strip()
+        
+        if 'description' in data and data['description'].strip():
+            task.description = data['description'].strip()
+        
+        if 'category' in data:
+            task.category = data['category']
+        
+        if 'location' in data and data['location'].strip():
+            task.location = data['location'].strip()
+        
+        if 'latitude' in data:
+            task.latitude = data['latitude']
+        
+        if 'longitude' in data:
+            task.longitude = data['longitude']
+        
+        if 'budget' in data:
+            task.budget = data['budget']
+        
+        if 'deadline' in data:
+            if data['deadline']:
+                try:
+                    task.deadline = datetime.fromisoformat(data['deadline'])
+                except ValueError:
+                    return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
+            else:
+                task.deadline = None
+        
+        if 'difficulty' in data:
+            if data['difficulty'] not in ['easy', 'medium', 'hard']:
+                return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
+            task.difficulty = data['difficulty']
+        
+        task.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f'Task {task_id} updated successfully')
+        
+        return jsonify({
+            'message': 'Task updated successfully',
+            'task': task.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f'Error updating task {task_id}: {str(e)}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
