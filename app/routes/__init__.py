@@ -22,7 +22,6 @@ def register_routes(app):
     from .reviews import reviews_bp
     from .uploads import uploads_bp
     from .messages import messages_bp
-    from .helpers import helpers_bp
     from .offerings import offerings_bp
     from .favorites import favorites_bp
     from .admin import admin_bp
@@ -40,7 +39,6 @@ def register_routes(app):
     app.register_blueprint(reviews_bp, url_prefix='/api/reviews')
     app.register_blueprint(uploads_bp, url_prefix='/api/uploads')
     app.register_blueprint(messages_bp, url_prefix='/api/messages')
-    app.register_blueprint(helpers_bp, url_prefix='/api/helpers')
     app.register_blueprint(offerings_bp, url_prefix='/api/offerings')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
     app.register_blueprint(favorites_bp)  # Routes already have /api/favorites prefix
