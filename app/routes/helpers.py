@@ -1,5 +1,6 @@
 """Shared helper utilities for route handlers."""
 
+import math
 from flask import jsonify
 import logging
 
@@ -29,6 +30,10 @@ def validate_price_range(value, field_name='Price'):
     try:
         num = float(value)
     except (ValueError, TypeError):
+        return jsonify({'error': f'{field_name} must be a valid number'}), 400
+    
+    # Reject NaN, Infinity, -Infinity
+    if not math.isfinite(num):
         return jsonify({'error': f'{field_name} must be a valid number'}), 400
     
     if num < MIN_PRICE or num > MAX_PRICE:
