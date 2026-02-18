@@ -226,8 +226,12 @@ def get_job_alert_preferences(current_user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
+        prefs = user.get_job_alert_prefs()
+        # Include whether the user has location set so frontend can decide
+        prefs['has_location'] = user.latitude is not None and user.longitude is not None
+        
         return jsonify({
-            'preferences': user.get_job_alert_prefs()
+            'preferences': prefs
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -242,12 +246,15 @@ def update_job_alert_preferences(current_user_id):
     {
         "enabled": true,
         "radius_km": 10,
-        "categories": ["cleaning", "delivery"]
+        "categories": ["cleaning", "delivery"],
+        "latitude": 56.9496,
+        "longitude": 24.1052
     }
     
     - enabled: Whether to receive job alerts (bool)
     - radius_km: Search radius in km, 1-50 (number)
     - categories: List of category keys to filter by. Empty list = all categories.
+    - latitude/longitude: Optional — saves user location when enabling alerts.
     """
     try:
         from app.models import User
@@ -258,6 +265,14 @@ def update_job_alert_preferences(current_user_id):
         data = request.get_json()
         if not data:
             return jsonify({'error': 'Request body required'}), 400
+        
+        # If lat/lng are provided, save them to the user profile first
+        if 'latitude' in data and 'longitude' in data:
+            lat = data['latitude']
+            lng = data['longitude']
+            if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                user.latitude = lat
+                user.longitude = lng
         
         # Validate
         prefs = user.get_job_alert_prefs()
@@ -275,22 +290,25 @@ def update_job_alert_preferences(current_user_id):
             cats = data['categories']
             if not isinstance(cats, list):
                 return jsonify({'error': 'categories must be a list'}), 400
-            if len(cats) > 10:
-                return jsonify({'error': 'Maximum 10 categories allowed'}), 400
+            if len(cats) > 18:
+                return jsonify({'error': 'Maximum 18 categories allowed'}), 400
             prefs['categories'] = cats
         
         # Check location requirement when enabling
         if prefs['enabled'] and (user.latitude is None or user.longitude is None):
             return jsonify({
-                'error': 'Location required. Set your location in profile settings to receive job alerts.'
+                'error': 'location_required'
             }), 400
         
         user.set_job_alert_prefs(prefs)
         db.session.commit()
         
+        result_prefs = prefs.copy()
+        result_prefs['has_location'] = user.latitude is not None and user.longitude is not None
+        
         return jsonify({
             'message': 'Job alert preferences updated',
-            'preferences': prefs
+            'preferences': result_prefs
         }), 200
     except Exception as e:
         db.session.rollback()
