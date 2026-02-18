@@ -92,7 +92,7 @@ def mark_notifications_by_type(current_user_id):
     Body params:
         - type: 'accepted_applications' | 'new_applications' | 'task_marked_done' |
                 'task_completed' | 'review_reminder' | 'task_disputed' |
-                'task_cancelled' | 'new_review' | 'all'
+                'task_cancelled' | 'new_review' | 'new_task_nearby' | 'all'
     """
     try:
         data = request.get_json() or {}
@@ -115,6 +115,7 @@ def mark_notifications_by_type(current_user_id):
             'task_cancelled': NotificationType.TASK_CANCELLED,
             'new_review': NotificationType.NEW_REVIEW,
             'application_rejected': NotificationType.APPLICATION_REJECTED,
+            'new_task_nearby': NotificationType.NEW_TASK_NEARBY,
         }
         
         if notification_type in type_map:
@@ -207,6 +208,89 @@ def delete_notification(current_user_id, notification_id):
         
         return jsonify({
             'message': 'Notification deleted'
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============ JOB ALERT PREFERENCES ============
+
+@notifications_bp.route('/job-alerts', methods=['GET'])
+@token_required
+def get_job_alert_preferences(current_user_id):
+    """Get the current user's job alert preferences."""
+    try:
+        from app.models import User
+        user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify({
+            'preferences': user.get_job_alert_prefs()
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@notifications_bp.route('/job-alerts', methods=['PUT'])
+@token_required
+def update_job_alert_preferences(current_user_id):
+    """Update the current user's job alert preferences.
+    
+    Body:
+    {
+        "enabled": true,
+        "radius_km": 10,
+        "categories": ["cleaning", "delivery"]
+    }
+    
+    - enabled: Whether to receive job alerts (bool)
+    - radius_km: Search radius in km, 1-50 (number)
+    - categories: List of category keys to filter by. Empty list = all categories.
+    """
+    try:
+        from app.models import User
+        user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body required'}), 400
+        
+        # Validate
+        prefs = user.get_job_alert_prefs()
+        
+        if 'enabled' in data:
+            prefs['enabled'] = bool(data['enabled'])
+        
+        if 'radius_km' in data:
+            radius = data['radius_km']
+            if not isinstance(radius, (int, float)) or radius < 1 or radius > 50:
+                return jsonify({'error': 'radius_km must be a number between 1 and 50'}), 400
+            prefs['radius_km'] = radius
+        
+        if 'categories' in data:
+            cats = data['categories']
+            if not isinstance(cats, list):
+                return jsonify({'error': 'categories must be a list'}), 400
+            if len(cats) > 10:
+                return jsonify({'error': 'Maximum 10 categories allowed'}), 400
+            prefs['categories'] = cats
+        
+        # Check location requirement when enabling
+        if prefs['enabled'] and (user.latitude is None or user.longitude is None):
+            return jsonify({
+                'error': 'Location required. Set your location in profile settings to receive job alerts.'
+            }), 400
+        
+        user.set_job_alert_prefs(prefs)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Job alert preferences updated',
+            'preferences': prefs
         }), 200
     except Exception as e:
         db.session.rollback()
@@ -368,4 +452,36 @@ def notify_new_review(user_id: int, reviewer_name: str, task_title: str, task_id
         related_type='task',
         related_id=task_id,
         data={'reviewer_name': reviewer_name, 'task_title': task_title, 'rating': rating}
+    )
+
+
+def notify_new_task_nearby(user_id: int, task_title: str, task_id: int,
+                           category_key: str, distance_km: float,
+                           budget: str = None, location: str = None) -> Notification:
+    """Create notification when a new task is posted near a user with job alerts on.
+    
+    Args:
+        user_id: The user to notify
+        task_title: Title of the new task
+        task_id: ID of the new task
+        category_key: Raw category key (e.g. 'cleaning') — frontend translates
+        distance_km: Distance in km from user to task
+        budget: Optional budget string (e.g. '€25' or '€15/hr')
+        location: Optional location name
+    """
+    dist_display = f'{distance_km:.1f} km'
+    return create_notification(
+        user_id=user_id,
+        notification_type=NotificationType.NEW_TASK_NEARBY,
+        title=f'\U0001f4cd New {category_key} task nearby',
+        message=f'New task "{task_title}" posted {dist_display} away.',
+        related_type='task',
+        related_id=task_id,
+        data={
+            'task_title': task_title,
+            'category_key': category_key,
+            'distance': dist_display,
+            'budget': budget,
+            'location': location,
+        }
     )
