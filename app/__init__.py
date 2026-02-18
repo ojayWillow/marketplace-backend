@@ -66,6 +66,8 @@ def create_app(config_name=None):
         "https://marketplace-frontend-tau-seven.vercel.app",
         "https://marketplace-backend-qmh6.onrender.com",  # Old Render backend
         "https://marketplace-backend-production-e808.up.railway.app",  # Railway backend
+        "https://www.kolab.lv",  # Production frontend
+        "https://kolab.lv",  # Production frontend (non-www)
     ]
     
     # Add custom frontend URL if set
