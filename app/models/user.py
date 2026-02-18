@@ -1,9 +1,18 @@
 """User model for authentication and user management."""
 
+import json
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import func
 from app import db
+
+
+# Default job alert preferences
+DEFAULT_JOB_ALERT_PREFERENCES = {
+    'enabled': False,
+    'radius_km': 5,
+    'categories': [],  # empty = all categories
+}
 
 
 class User(db.Model):
@@ -44,6 +53,10 @@ class User(db.Model):
     hourly_rate = db.Column(db.Float, nullable=True)
     latitude = db.Column(db.Float, nullable=True)
     longitude = db.Column(db.Float, nullable=True)
+    
+    # Job alert preferences (JSON string)
+    # Stores: { enabled: bool, radius_km: float, categories: list[str] }
+    job_alert_preferences = db.Column(db.Text, nullable=True)
     
     # Relationships
     listings = db.relationship('Listing', backref='seller', lazy='dynamic', foreign_keys='Listing.seller_id')
@@ -190,6 +203,19 @@ class User(db.Model):
         else:
             return self.last_seen.strftime("%b %d, %Y")
     
+    def get_job_alert_prefs(self) -> dict:
+        """Get job alert preferences as a dictionary."""
+        if self.job_alert_preferences:
+            try:
+                return json.loads(self.job_alert_preferences)
+            except (json.JSONDecodeError, TypeError):
+                return DEFAULT_JOB_ALERT_PREFERENCES.copy()
+        return DEFAULT_JOB_ALERT_PREFERENCES.copy()
+    
+    def set_job_alert_prefs(self, prefs: dict):
+        """Set job alert preferences from a dictionary."""
+        self.job_alert_preferences = json.dumps(prefs) if prefs else None
+    
     def to_dict(self):
         """Convert user to dictionary."""
         return {
@@ -223,7 +249,8 @@ class User(db.Model):
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
             'is_online': self.is_online,
             'online_status': self.get_online_status(),
-            'last_seen_display': self.get_last_seen_display()
+            'last_seen_display': self.get_last_seen_display(),
+            'job_alert_preferences': self.get_job_alert_prefs(),
         }
     
     def to_public_dict(self):
