@@ -374,6 +374,9 @@ def create_task(current_user_id):
     
     Requires authentication. The creator_id is extracted from the JWT
     token — any creator_id sent in the request body is ignored.
+    
+    After creation, sends job alert notifications to nearby users
+    who have matching preferences (category + radius).
     """
     try:
         data = request.get_json()
@@ -425,6 +428,17 @@ def create_task(current_user_id):
         db.session.commit()
         
         logger.info(f'Task created successfully: {task.id}, difficulty: {task.difficulty}, images: {task.images}')
+        
+        # --- Job Alerts: notify nearby users asynchronously ---
+        # Runs after commit so the task has an ID. Wrapped in try/except
+        # so a notification failure never blocks task creation.
+        try:
+            from app.services.job_alerts import send_job_alerts_for_task
+            alerts_sent = send_job_alerts_for_task(task)
+            if alerts_sent > 0:
+                logger.info(f'Sent {alerts_sent} job alert(s) for new task {task.id}')
+        except Exception as alert_err:
+            logger.error(f'Job alerts failed for task {task.id}: {alert_err}', exc_info=True)
         
         return jsonify({
             'message': 'Task created successfully',
