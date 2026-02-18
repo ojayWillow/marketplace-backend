@@ -124,6 +124,21 @@ except Exception as e:
     print(f'[HOTFIX] Warning: {e}')
 " 2>&1 || echo "[HOTFIX] Warning: disputes hotfix failed"
 
+# Hotfix: add job_alert_preferences column to users table
+echo "[HOTFIX] Ensuring job_alert_preferences column exists on users table..."
+python -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS job_alert_preferences TEXT')
+    print('[HOTFIX] job_alert_preferences column ready')
+    conn.close()
+except Exception as e:
+    print(f'[HOTFIX] Warning: {e}')
+" 2>&1 || echo "[HOTFIX] Warning: job_alert_preferences hotfix failed"
+
 # Stamp Alembic version if DB was created via db.create_all() (no migration history)
 # This prevents Alembic from trying to replay all migrations on an already-populated DB
 echo "[ALEMBIC] Checking migration state..."
