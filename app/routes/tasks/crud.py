@@ -13,6 +13,7 @@ from app.routes.tasks.helpers import (
     distance,
     translate_task_if_needed,
 )
+from app.routes.helpers import validate_price_range
 from datetime import datetime
 import jwt
 import logging
@@ -395,6 +396,13 @@ def create_task(current_user_id):
             missing = [k for k in required_fields if k not in data]
             return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
         
+        # Validate budget range
+        budget = data.get('budget')
+        if budget is not None:
+            error_response = validate_price_range(budget, 'Budget')
+            if error_response:
+                return error_response
+        
         deadline = None
         if data.get('deadline'):
             try:
@@ -474,6 +482,12 @@ def update_task(current_user_id, task_id):
             return jsonify({'error': 'No data provided'}), 400
         
         logger.info(f'Updating task {task_id} for user {current_user_id} with data: {data}')
+        
+        # Validate budget range if provided
+        if 'budget' in data and data['budget'] is not None:
+            error_response = validate_price_range(data['budget'], 'Budget')
+            if error_response:
+                return error_response
         
         # Update allowed fields
         if 'title' in data and data['title'].strip():

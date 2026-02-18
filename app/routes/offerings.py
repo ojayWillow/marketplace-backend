@@ -9,6 +9,7 @@ from app.models.offering import Offering
 from app.models.user import User
 from app.models.message import Conversation, Message
 from app.utils import token_required_g, token_optional_g
+from app.routes.helpers import validate_price_range
 
 offerings_bp = Blueprint('offerings', __name__)
 
@@ -259,6 +260,14 @@ def create_offering():
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
+        # Validate price range (skip for negotiable)
+        price_type = data.get('price_type', 'hourly')
+        price = data.get('price')
+        if price_type != 'negotiable' and price is not None:
+            error_response = validate_price_range(price, 'Price')
+            if error_response:
+                return error_response
+        
         offering = Offering(
             title=data['title'],
             description=data['description'],
@@ -267,7 +276,7 @@ def create_offering():
             latitude=data['latitude'],
             longitude=data['longitude'],
             price=data.get('price'),
-            price_type=data.get('price_type', 'hourly'),
+            price_type=price_type,
             currency=data.get('currency', 'EUR'),
             status='active',
             creator_id=g.current_user.id,
@@ -305,6 +314,13 @@ def update_offering(offering_id):
             return jsonify({'error': 'Unauthorized'}), 403
         
         data = request.get_json()
+        
+        # Validate price range if provided (skip for negotiable)
+        price_type = data.get('price_type', offering.price_type)
+        if 'price' in data and data['price'] is not None and price_type != 'negotiable':
+            error_response = validate_price_range(data['price'], 'Price')
+            if error_response:
+                return error_response
         
         # Update fields if provided
         updateable_fields = [
