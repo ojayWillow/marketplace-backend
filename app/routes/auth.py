@@ -23,6 +23,13 @@ EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 # Username validation: 3-30 chars, alphanumeric + underscores
 USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_]{3,30}$')
 
+# Allowed fields for profile update (prevent mass assignment)
+PROFILE_ALLOWED_FIELDS = {
+    'first_name', 'last_name', 'bio', 'phone', 'city', 'country',
+    'avatar_url', 'profile_picture_url', 'is_helper', 'skills',
+    'helper_categories', 'hourly_rate', 'latitude', 'longitude'
+}
+
 
 def _get_secret_key():
     """Get JWT secret from Flask app config (single source of truth)."""
@@ -38,6 +45,80 @@ def generate_temp_username():
 def generate_temp_password():
     """Generate a secure random password for phone-authenticated users."""
     return secrets.token_urlsafe(32)
+
+
+def _validate_profile_data(data):
+    """Validate profile update fields. Returns error message or None."""
+    # Check for unknown fields
+    unknown = set(data.keys()) - PROFILE_ALLOWED_FIELDS
+    if unknown:
+        return f"Unknown fields: {', '.join(unknown)}"
+    
+    # String length limits
+    length_limits = {
+        'first_name': 50,
+        'last_name': 50,
+        'bio': 500,
+        'phone': 20,
+        'city': 100,
+        'country': 100,
+        'avatar_url': 500,
+        'profile_picture_url': 500,
+    }
+    
+    for field, max_len in length_limits.items():
+        if field in data and data[field] is not None:
+            if not isinstance(data[field], str):
+                return f"{field} must be a string"
+            if len(data[field]) > max_len:
+                return f"{field} must be less than {max_len} characters"
+    
+    # Numeric validations
+    if 'hourly_rate' in data and data['hourly_rate'] is not None:
+        try:
+            rate = float(data['hourly_rate'])
+            if rate < 0 or rate > 10000:
+                return "hourly_rate must be between 0 and 10000"
+        except (TypeError, ValueError):
+            return "hourly_rate must be a number"
+    
+    if 'latitude' in data and data['latitude'] is not None:
+        try:
+            lat = float(data['latitude'])
+            if lat < -90 or lat > 90:
+                return "latitude must be between -90 and 90"
+        except (TypeError, ValueError):
+            return "latitude must be a number"
+    
+    if 'longitude' in data and data['longitude'] is not None:
+        try:
+            lng = float(data['longitude'])
+            if lng < -180 or lng > 180:
+                return "longitude must be between -180 and 180"
+        except (TypeError, ValueError):
+            return "longitude must be a number"
+    
+    # Boolean validation
+    if 'is_helper' in data and not isinstance(data['is_helper'], bool):
+        return "is_helper must be a boolean"
+    
+    # List validations
+    for list_field in ('skills', 'helper_categories'):
+        if list_field in data and data[list_field] is not None:
+            val = data[list_field]
+            if isinstance(val, list):
+                if len(val) > 20:
+                    return f"{list_field} can have at most 20 items"
+                for item in val:
+                    if not isinstance(item, str) or len(item) > 50:
+                        return f"Each item in {list_field} must be a string under 50 characters"
+            elif isinstance(val, str):
+                if len(val) > 1000:
+                    return f"{list_field} must be less than 1000 characters"
+            else:
+                return f"{list_field} must be a list or string"
+    
+    return None
 
 
 @auth_bp.route('/register', methods=['POST'])
@@ -819,6 +900,14 @@ def update_profile(current_user_id):
             return jsonify({'error': 'User not found'}), 404
         
         data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Validate all fields before applying any changes
+        validation_error = _validate_profile_data(data)
+        if validation_error:
+            return jsonify({'error': validation_error}), 400
         
         if 'first_name' in data:
             user.first_name = data['first_name']
