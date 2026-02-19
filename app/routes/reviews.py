@@ -6,6 +6,7 @@ Users can only review each other after:
 - Completing a listing sale (buyer reviews seller, seller reviews buyer)
 """
 
+import logging
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func, case
@@ -14,6 +15,7 @@ from app.models import Review, User, Listing, TaskRequest
 from app.utils import token_required, token_optional, get_display_name
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
 reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
 
 # Minimum characters required for review content
@@ -85,7 +87,7 @@ def get_reviews():
             'has_more': paginated.has_next
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/task/<int:task_id>', methods=['GET'])
@@ -108,7 +110,7 @@ def get_task_reviews(task_id):
             'total': len(result)
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/task/<int:task_id>/can-review', methods=['GET'])
@@ -166,7 +168,7 @@ def can_review_task(current_user_id, task_id):
             'min_content_length': MIN_REVIEW_CONTENT_LENGTH
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/task/<int:task_id>', methods=['POST'])
@@ -246,7 +248,7 @@ def create_task_review(current_user_id, task_id):
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"Notification skipped (non-critical): {notify_error}")
+            logger.warning(f"Review notification skipped (non-critical): {notify_error}")
         
         # Reload with relationships for response
         review = Review.query.options(
@@ -267,7 +269,7 @@ def create_task_review(current_user_id, task_id):
         }), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/user/<int:user_id>/stats', methods=['GET'])
@@ -347,7 +349,7 @@ def get_user_review_stats(user_id):
             }
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/can-review-user/<int:user_id>', methods=['GET'])
@@ -415,7 +417,7 @@ def can_review_user(current_user_id, user_id):
         }), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/<int:review_id>', methods=['GET'])
@@ -439,7 +441,7 @@ def get_review(review_id):
         
         return jsonify(review_dict), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/<int:review_id>', methods=['PUT'])
@@ -481,7 +483,7 @@ def update_review(current_user_id, review_id):
         return jsonify({'message': 'Review updated', 'review': review.to_dict()}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @reviews_bp.route('/<int:review_id>', methods=['DELETE'])
@@ -506,4 +508,4 @@ def delete_review(current_user_id, review_id):
         return jsonify({'message': 'Review deleted'}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
