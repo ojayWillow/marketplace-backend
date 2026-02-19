@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.message import Conversation, Message
 from app.utils import token_required_g, token_optional_g
 from app.routes.helpers import validate_price_range
+from app.constants.categories import validate_category, normalize_category
 
 offerings_bp = Blueprint('offerings', __name__)
 
@@ -101,9 +102,10 @@ def get_offerings():
         if status:
             query = query.filter(Offering.status == status)
         
-        # Filter by category
+        # Filter by category (normalize legacy keys)
         if category:
-            query = query.filter(Offering.category == category)
+            normalized = normalize_category(category)
+            query = query.filter(Offering.category == normalized)
         
         # Filter by boosted only (for map display)
         if boosted_only:
@@ -260,6 +262,11 @@ def create_offering():
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
+        # Validate & normalize category (converts legacy keys automatically)
+        category, cat_error = validate_category(data['category'])
+        if cat_error:
+            return jsonify({'error': cat_error}), 400
+        
         # Validate price range (skip for negotiable)
         price_type = data.get('price_type', 'hourly')
         price = data.get('price')
@@ -271,7 +278,7 @@ def create_offering():
         offering = Offering(
             title=data['title'],
             description=data['description'],
-            category=data['category'],
+            category=category,  # Use validated & normalized category
             location=data['location'],
             latitude=data['latitude'],
             longitude=data['longitude'],
@@ -321,6 +328,13 @@ def update_offering(offering_id):
             error_response = validate_price_range(data['price'], 'Price')
             if error_response:
                 return error_response
+        
+        # Validate & normalize category if provided
+        if 'category' in data:
+            category, cat_error = validate_category(data['category'])
+            if cat_error:
+                return jsonify({'error': cat_error}), 400
+            data['category'] = category
         
         # Update fields if provided
         updateable_fields = [
