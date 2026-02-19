@@ -72,7 +72,7 @@ def get_item_details(item_type, item_id):
     return None
 
 
-@favorites_bp.route('/api/favorites', methods=['POST'])
+@favorites_bp.route('', methods=['POST'])
 @token_required
 def toggle_favorite(current_user_id):
     """Toggle favorite status for an item (add if not favorited, remove if already favorited)."""
@@ -102,7 +102,7 @@ def toggle_favorite(current_user_id):
     }), 200
 
 
-@favorites_bp.route('/api/favorites', methods=['GET'])
+@favorites_bp.route('', methods=['GET'])
 @token_required
 def get_favorites(current_user_id):
     """Get all favorites for the current user with full item details."""
@@ -126,7 +126,7 @@ def get_favorites(current_user_id):
     }), 200
 
 
-@favorites_bp.route('/api/favorites/check', methods=['GET'])
+@favorites_bp.route('/check', methods=['GET'])
 @token_required
 def check_favorites(current_user_id):
     """Check if multiple items are favorited by the current user.
@@ -152,7 +152,7 @@ def check_favorites(current_user_id):
     return jsonify({'favorites': result}), 200
 
 
-@favorites_bp.route('/api/favorites/<int:favorite_id>', methods=['DELETE'])
+@favorites_bp.route('/<int:favorite_id>', methods=['DELETE'])
 @token_required
 def remove_favorite(current_user_id, favorite_id):
     """Remove a specific favorite by its ID."""
@@ -167,7 +167,7 @@ def remove_favorite(current_user_id, favorite_id):
     return jsonify({'message': 'Favorite removed successfully'}), 200
 
 
-@favorites_bp.route('/api/favorites/item/<item_type>/<int:item_id>', methods=['DELETE'])
+@favorites_bp.route('/item/<item_type>/<int:item_id>', methods=['DELETE'])
 @token_required
 def remove_favorite_by_item(current_user_id, item_type, item_id):
     """Remove a favorite by item type and ID."""
@@ -189,7 +189,7 @@ def remove_favorite_by_item(current_user_id, item_type, item_id):
     return jsonify({'message': 'Favorite removed successfully'}), 200
 
 
-@favorites_bp.route('/api/favorites/count', methods=['GET'])
+@favorites_bp.route('/count', methods=['GET'])
 @token_required
 def get_favorites_count(current_user_id):
     """Get count of user's favorites by type."""
