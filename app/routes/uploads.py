@@ -7,10 +7,9 @@ Supports uploading images for:
 """
 
 from flask import Blueprint, request, jsonify, current_app
-import jwt
-from functools import wraps
 import logging
 
+from app.utils.auth import token_required
 from app.services.storage import (
     upload_avatar,
     upload_task_image,
@@ -30,29 +29,6 @@ IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'}
 AVATAR_MAX_SIZE = 5 * 1024 * 1024  # 5MB
 TASK_IMAGE_MAX_SIZE = 10 * 1024 * 1024  # 10MB
 CHAT_IMAGE_MAX_SIZE = 10 * 1024 * 1024  # 10MB
-
-
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            logger.warning('Upload attempt without auth token')
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = token.split(' ')[1] if ' ' in token else token
-            data = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
-            current_user_id = data['user_id']
-        except jwt.ExpiredSignatureError:
-            logger.warning('Upload attempt with expired token')
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            logger.warning(f'Upload attempt with invalid token: {e}')
-            return jsonify({'error': 'Token is invalid'}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
 
 
 def allowed_image(filename):
