@@ -1,16 +1,14 @@
 """Push notification subscription routes."""
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from functools import wraps
 import jwt
-import os
 
 from app import db
 from app.models import PushSubscription
+import os
 
 push_bp = Blueprint('push', __name__)
-
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 # Get VAPID public key for frontend
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
@@ -27,7 +25,7 @@ def token_required(f):
         
         try:
             token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            payload = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
             current_user_id = payload['user_id']
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token has expired'}), 401

@@ -6,8 +6,7 @@ Supports uploading images for:
 - Chat message attachments
 """
 
-from flask import Blueprint, request, jsonify
-import os
+from flask import Blueprint, request, jsonify, current_app
 import jwt
 from functools import wraps
 import logging
@@ -23,9 +22,6 @@ from app import db
 
 uploads_bp = Blueprint('uploads', __name__)
 logger = logging.getLogger(__name__)
-
-# Use the same key as Flask-JWT-Extended configuration
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 # Allowed file extensions
 IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'}
@@ -46,7 +42,7 @@ def token_required(f):
         
         try:
             token = token.split(' ')[1] if ' ' in token else token
-            data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            data = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
             current_user_id = data['user_id']
         except jwt.ExpiredSignatureError:
             logger.warning('Upload attempt with expired token')
