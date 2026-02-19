@@ -378,52 +378,15 @@ def create_task(current_user_id):
         db.session.commit()
 
         # ----------------------------------------------------------------
-        # Job Alert Notifications — notify nearby users with matching prefs
+        # Job Alerts — notify nearby users with matching preferences
         # ----------------------------------------------------------------
         try:
-            from app.models import JobAlertPreference
-
-            # Query all alert preferences that match this task's category
-            matching_prefs = JobAlertPreference.query.filter(
-                JobAlertPreference.user_id != current_user_id,  # Don't notify creator
-                JobAlertPreference.is_active == True,
-            ).all()
-
-            notified_count = 0
-            for pref in matching_prefs:
-                # Check category match (if pref has categories set)
-                if pref.categories:
-                    pref_categories = [c.strip() for c in pref.categories.split(',')]
-                    if category not in pref_categories:
-                        continue
-
-                # Check distance (if pref has location + radius)
-                if pref.latitude and pref.longitude and pref.radius_km:
-                    dist = distance(pref.latitude, pref.longitude, task.latitude, task.longitude)
-                    if dist > pref.radius_km:
-                        continue
-
-                # Send notification
-                notification = Notification(
-                    user_id=pref.user_id,
-                    type=NotificationType.JOB_ALERT,
-                    title=f'New job nearby: {task.title}',
-                    message=f'{task.title} in {task.location}' + (f' — €{task.budget}' if task.budget else ''),
-                    related_type='task',
-                    related_id=task.id,
-                )
-                db.session.add(notification)
-                notified_count += 1
-
-            if notified_count > 0:
-                db.session.commit()
-                logger.info(f'Job alerts sent to {notified_count} users for task {task.id}')
-
-        except ImportError:
-            logger.debug('JobAlertPreference not available — skipping job alerts')
+            from app.services.job_alerts import send_job_alerts_for_task
+            alerts_sent = send_job_alerts_for_task(task)
+            if alerts_sent > 0:
+                logger.info(f'Sent {alerts_sent} job alert(s) for new task {task.id}')
         except Exception as alert_err:
-            logger.warning(f'Job alert notifications failed (non-fatal): {alert_err}')
-            # Don't rollback the task creation
+            logger.error(f'Job alerts failed for task {task.id}: {alert_err}', exc_info=True)
 
         return jsonify(task.to_dict()), 201
 
