@@ -1,6 +1,5 @@
 """Notification routes for user notifications."""
 
-import traceback
 import logging
 from flask import Blueprint, request, jsonify
 from app import db
@@ -17,7 +16,7 @@ notifications_bp = Blueprint('notifications', __name__)
 @token_required
 def get_notifications(current_user_id):
     """Get all notifications for the current user.
-    
+
     Query params:
         - unread_only: If 'true', only return unread notifications
         - page: Page number (default 1)
@@ -27,16 +26,16 @@ def get_notifications(current_user_id):
         unread_only = request.args.get('unread_only', 'false').lower() == 'true'
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 20, type=int), 100)
-        
+
         query = Notification.query.filter_by(user_id=current_user_id)
-        
+
         if unread_only:
             query = query.filter_by(is_read=False)
-        
+
         notifications = query.order_by(Notification.created_at.desc()).paginate(
             page=page, per_page=per_page
         )
-        
+
         return jsonify({
             'notifications': [n.to_dict() for n in notifications.items],
             'total': notifications.total,
@@ -44,14 +43,12 @@ def get_notifications(current_user_id):
             'per_page': per_page,
             'has_more': notifications.has_next,
             'unread_count': Notification.query.filter_by(
-                user_id=current_user_id, 
+                user_id=current_user_id,
                 is_read=False
             ).count()
         }), 200
     except Exception as e:
-        print(f'[NOTIFICATIONS ERROR] get_notifications: {e}')
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @notifications_bp.route('/unread-count', methods=['GET'])
@@ -59,39 +56,31 @@ def get_notifications(current_user_id):
 def get_unread_count(current_user_id):
     """Get count of unread notifications."""
     try:
-        print(f'[NOTIFICATIONS] unread-count called for user_id={current_user_id}')
-        
         unread_count = Notification.query.filter_by(
             user_id=current_user_id,
             is_read=False
         ).count()
-        
-        print(f'[NOTIFICATIONS] unread_count={unread_count}, checking accepted...')
-        
+
         # Also get counts by type for badges
         accepted_count = Notification.query.filter_by(
             user_id=current_user_id,
             is_read=False,
             type=NotificationType.APPLICATION_ACCEPTED
         ).count()
-        
-        print(f'[NOTIFICATIONS] accepted_count={accepted_count}, returning 200')
-        
+
         return jsonify({
             'unread_count': unread_count,
             'accepted_applications': accepted_count
         }), 200
     except Exception as e:
-        print(f'[NOTIFICATIONS ERROR] unread-count: {type(e).__name__}: {e}')
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @notifications_bp.route('/mark-read', methods=['POST'])
 @token_required
 def mark_notifications_by_type(current_user_id):
     """Mark notifications as read by type.
-    
+
     Body params:
         - type: 'accepted_applications' | 'new_applications' | 'task_marked_done' |
                 'task_completed' | 'review_reminder' | 'task_disputed' |
@@ -100,13 +89,13 @@ def mark_notifications_by_type(current_user_id):
     try:
         data = request.get_json() or {}
         notification_type = data.get('type', 'all')
-        
+
         now = datetime.utcnow()
         query = Notification.query.filter_by(
             user_id=current_user_id,
             is_read=False
         )
-        
+
         # Map request type names to NotificationType constants
         type_map = {
             'accepted_applications': NotificationType.APPLICATION_ACCEPTED,
@@ -120,27 +109,25 @@ def mark_notifications_by_type(current_user_id):
             'application_rejected': NotificationType.APPLICATION_REJECTED,
             'new_task_nearby': NotificationType.NEW_TASK_NEARBY,
         }
-        
+
         if notification_type in type_map:
             query = query.filter_by(type=type_map[notification_type])
         # 'all' type marks all unread notifications
-        
+
         updated_count = query.update({
             'is_read': True,
             'read_at': now
         })
-        
+
         db.session.commit()
-        
+
         return jsonify({
             'message': f'Marked {updated_count} notification(s) as read',
             'updated_count': updated_count
         }), 200
     except Exception as e:
         db.session.rollback()
-        print(f'[NOTIFICATIONS ERROR] mark-read: {e}')
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @notifications_bp.route('/<int:notification_id>/read', methods=['POST'])
@@ -149,23 +136,23 @@ def mark_as_read(current_user_id, notification_id):
     """Mark a notification as read."""
     try:
         notification = Notification.query.get(notification_id)
-        
+
         if not notification:
             return jsonify({'error': 'Notification not found'}), 404
-        
+
         if notification.user_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
-        
+
         notification.mark_as_read()
         db.session.commit()
-        
+
         return jsonify({
             'message': 'Notification marked as read',
             'notification': notification.to_dict()
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @notifications_bp.route('/read-all', methods=['POST'])
@@ -174,7 +161,7 @@ def mark_all_as_read(current_user_id):
     """Mark all notifications as read for current user."""
     try:
         now = datetime.utcnow()
-        
+
         Notification.query.filter_by(
             user_id=current_user_id,
             is_read=False
@@ -182,15 +169,15 @@ def mark_all_as_read(current_user_id):
             'is_read': True,
             'read_at': now
         })
-        
+
         db.session.commit()
-        
+
         return jsonify({
             'message': 'All notifications marked as read'
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @notifications_bp.route('/<int:notification_id>', methods=['DELETE'])
@@ -199,22 +186,22 @@ def delete_notification(current_user_id, notification_id):
     """Delete a notification."""
     try:
         notification = Notification.query.get(notification_id)
-        
+
         if not notification:
             return jsonify({'error': 'Notification not found'}), 404
-        
+
         if notification.user_id != current_user_id:
             return jsonify({'error': 'Unauthorized'}), 403
-        
+
         db.session.delete(notification)
         db.session.commit()
-        
+
         return jsonify({
             'message': 'Notification deleted'
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ============ JOB ALERT PREFERENCES ============
@@ -228,23 +215,23 @@ def get_job_alert_preferences(current_user_id):
         user = User.query.get(current_user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
+
         prefs = user.get_job_alert_prefs()
         # Include whether the user has location set so frontend can decide
         prefs['has_location'] = user.latitude is not None and user.longitude is not None
-        
+
         return jsonify({
             'preferences': prefs
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @notifications_bp.route('/job-alerts', methods=['PUT'])
 @token_required
 def update_job_alert_preferences(current_user_id):
     """Update the current user's job alert preferences.
-    
+
     Body:
     {
         "enabled": true,
@@ -253,7 +240,7 @@ def update_job_alert_preferences(current_user_id):
         "latitude": 56.9496,
         "longitude": 24.1052
     }
-    
+
     - enabled: Whether to receive job alerts (bool)
     - radius_km: Search radius in km, 1-50 (number)
     - categories: List of category keys to filter by. Empty list = all categories.
@@ -264,11 +251,11 @@ def update_job_alert_preferences(current_user_id):
         user = User.query.get(current_user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
+
         data = request.get_json()
         if not data:
             return jsonify({'error': 'Request body required'}), 400
-        
+
         # If lat/lng are provided, save them to the user profile first
         if 'latitude' in data and 'longitude' in data:
             lat = data['latitude']
@@ -276,19 +263,19 @@ def update_job_alert_preferences(current_user_id):
             if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
                 user.latitude = lat
                 user.longitude = lng
-        
+
         # Validate
         prefs = user.get_job_alert_prefs()
-        
+
         if 'enabled' in data:
             prefs['enabled'] = bool(data['enabled'])
-        
+
         if 'radius_km' in data:
             radius = data['radius_km']
             if not isinstance(radius, (int, float)) or radius < 1 or radius > 50:
                 return jsonify({'error': 'radius_km must be a number between 1 and 50'}), 400
             prefs['radius_km'] = radius
-        
+
         if 'categories' in data:
             cats = data['categories']
             if not isinstance(cats, list):
@@ -296,26 +283,26 @@ def update_job_alert_preferences(current_user_id):
             if len(cats) > 18:
                 return jsonify({'error': 'Maximum 18 categories allowed'}), 400
             prefs['categories'] = cats
-        
+
         # Check location requirement when enabling
         if prefs['enabled'] and (user.latitude is None or user.longitude is None):
             return jsonify({
                 'error': 'location_required'
             }), 400
-        
+
         user.set_job_alert_prefs(prefs)
         db.session.commit()
-        
+
         result_prefs = prefs.copy()
         result_prefs['has_location'] = user.latitude is not None and user.longitude is not None
-        
+
         return jsonify({
             'message': 'Job alert preferences updated',
             'preferences': result_prefs
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ============ PUSH CONFIG PER NOTIFICATION TYPE ============
@@ -379,14 +366,14 @@ PUSH_CONFIG = {
 
 # ============ HELPER FUNCTIONS FOR CREATING NOTIFICATIONS ============
 
-def create_notification(user_id: int, notification_type: str, title: str, message: str, 
+def create_notification(user_id: int, notification_type: str, title: str, message: str,
                        related_type: str = None, related_id: int = None,
                        data: dict = None, send_push: bool = True) -> Notification:
     """Helper function to create a notification AND send a push notification.
-    
+
     Every in-app notification automatically triggers a browser push notification
     unless send_push=False is passed.
-    
+
     Args:
         user_id: The ID of the user to notify
         notification_type: Type of notification (use NotificationType constants)
@@ -396,7 +383,7 @@ def create_notification(user_id: int, notification_type: str, title: str, messag
         related_id: ID of the related entity
         data: Dictionary with dynamic values for i18n (task_title, applicant_name, etc.)
         send_push: Whether to also send a browser push notification (default True)
-    
+
     Returns:
         The created Notification object
     """
@@ -408,28 +395,28 @@ def create_notification(user_id: int, notification_type: str, title: str, messag
         related_type=related_type,
         related_id=related_id
     )
-    
+
     if data:
         notification.set_data(data)
-    
+
     db.session.add(notification)
-    
+
     # --- Automatically send push notification ---
     if send_push:
         try:
             from app.services.push_notifications import send_push_notification
-            
+
             config = PUSH_CONFIG.get(notification_type, {})
             push_title = config.get('title', title)
-            
+
             # Build URL from template
             url_template = config.get('url_template', '/')
             push_url = url_template.format(related_id=related_id) if related_id else '/'
-            
+
             # Build tag
             tag_prefix = config.get('tag_prefix', 'notification')
             push_tag = f'{tag_prefix}-{related_id}' if related_id else tag_prefix
-            
+
             send_push_notification(
                 user_id=user_id,
                 title=push_title,
@@ -440,7 +427,7 @@ def create_notification(user_id: int, notification_type: str, title: str, messag
         except Exception as e:
             # Push failure should never block in-app notification creation
             logger.error(f'[NOTIFICATIONS] Push notification failed for user {user_id}: {e}')
-    
+
     return notification
 
 
@@ -528,7 +515,7 @@ def notify_task_disputed(user_id: int, task_title: str, task_id: int, is_creator
         message = f'A dispute has been raised for your task "{task_title}". Our team will review it shortly.'
     else:
         message = f'The task "{task_title}" has been disputed. Our team will review it shortly.'
-    
+
     return create_notification(
         user_id=user_id,
         notification_type=NotificationType.TASK_DISPUTED,
@@ -571,14 +558,14 @@ def notify_new_task_nearby(user_id: int, task_title: str, task_id: int,
                            category_key: str, distance_km: float,
                            budget: str = None, location: str = None) -> Notification:
     """Create notification when a new task is posted near a user with job alerts on.
-    
+
     Args:
         user_id: The user to notify
         task_title: Title of the new task
         task_id: ID of the new task
         category_key: Raw category key (e.g. 'cleaning') — frontend translates
         distance_km: Distance in km from user to task
-        budget: Optional budget string (e.g. '\u20ac25' or '\u20ac15/hr')
+        budget: Optional budget string (e.g. '€25' or '€15/hr')
         location: Optional location name
     """
     dist_display = f'{distance_km:.1f} km'
