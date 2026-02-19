@@ -1,12 +1,11 @@
 """Basic CRUD operations for tasks."""
 
-from flask import request, jsonify
+from flask import request, jsonify, current_app
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 from app import db
 from app.models import TaskRequest, User, TaskApplication
 from app.utils import token_required
-from app.utils.auth import SECRET_KEY
 from app.routes.tasks import tasks_bp
 from app.routes.tasks.helpers import (
     get_bounding_box,
@@ -33,7 +32,7 @@ def get_current_user_id_optional():
         return None
     try:
         token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        payload = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
         return payload.get('user_id')
     except:
         return None
