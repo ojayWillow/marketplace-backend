@@ -13,53 +13,12 @@ from app import db
 from app.models import TaskRequest, TaskApplication, User, Notification, NotificationType, Review
 from app.utils.auth import token_required
 from app.routes.tasks.helpers import distance, get_bounding_box
+from app.constants.categories import validate_category
 
 logger = logging.getLogger(__name__)
 
 # Use the shared blueprint from tasks/__init__.py
 from app.routes.tasks import tasks_bp
-
-# ---------------------------------------------------------------------------
-# Category helpers
-# ---------------------------------------------------------------------------
-
-VALID_CATEGORIES = [
-    'cleaning', 'delivery', 'handyman', 'moving', 'gardening',
-    'painting', 'assembly', 'plumbing', 'electrical', 'pet_care',
-    'tutoring', 'tech_support', 'cooking', 'shopping', 'laundry',
-    'childcare', 'elder_care', 'car_wash', 'other',
-]
-
-# Legacy key → normalised key
-_CATEGORY_ALIASES = {
-    'Cleaning': 'cleaning',
-    'Delivery': 'delivery',
-    'Handyman': 'handyman',
-    'Moving': 'moving',
-    'Gardening': 'gardening',
-    'Painting': 'painting',
-    'Assembly': 'assembly',
-    'Plumbing': 'plumbing',
-    'Electrical': 'electrical',
-    'Pet Care': 'pet_care',
-    'Tutoring': 'tutoring',
-    'Tech Support': 'tech_support',
-    'Cooking': 'cooking',
-    'Shopping': 'shopping',
-    'Laundry': 'laundry',
-    'Childcare': 'childcare',
-    'Elder Care': 'elder_care',
-    'Car Wash': 'car_wash',
-    'Other': 'other',
-}
-
-
-def validate_category(raw_category: str):
-    """Return (normalised_category, error_string | None)."""
-    cat = _CATEGORY_ALIASES.get(raw_category, raw_category)
-    if cat not in VALID_CATEGORIES:
-        return None, f'Invalid category "{raw_category}". Valid: {VALID_CATEGORIES}'
-    return cat, None
 
 
 def validate_price_range(budget, label='Budget'):
