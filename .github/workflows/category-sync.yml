@@ -1,0 +1,19 @@
+name: Category Sync Check
+
+on:
+  pull_request:
+    paths:
+      - 'app/constants/categories.py'
+  push:
+    branches: [main]
+    paths:
+      - 'app/constants/categories.py'
+
+jobs:
+  check-categories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify category alignment
+        run: python scripts/check_category_sync.py
