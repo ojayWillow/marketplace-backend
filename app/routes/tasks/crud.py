@@ -14,6 +14,7 @@ from app.routes.tasks.helpers import (
     translate_task_if_needed,
 )
 from app.routes.helpers import validate_price_range
+from app.constants.categories import validate_category, normalize_category
 from datetime import datetime
 import jwt
 import logging
@@ -195,8 +196,9 @@ def get_tasks():
         ).filter_by(status=status)
         
         # Support comma-separated categories (e.g. "cleaning,delivery")
+        # Normalize legacy keys so filtering works correctly
         if category:
-            categories = [c.strip() for c in category.split(',') if c.strip()]
+            categories = [normalize_category(c.strip()) for c in category.split(',') if c.strip()]
             if len(categories) == 1:
                 query = query.filter_by(category=categories[0])
             elif len(categories) > 1:
@@ -396,6 +398,11 @@ def create_task(current_user_id):
             missing = [k for k in required_fields if k not in data]
             return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
         
+        # Validate & normalize category (converts legacy keys automatically)
+        category, cat_error = validate_category(data['category'])
+        if cat_error:
+            return jsonify({'error': cat_error}), 400
+        
         # Validate budget range
         budget = data.get('budget')
         if budget is not None:
@@ -419,7 +426,7 @@ def create_task(current_user_id):
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
-            category=data['category'],
+            category=category,  # Use validated & normalized category
             location=data['location'],
             latitude=data['latitude'],
             longitude=data['longitude'],
@@ -435,7 +442,7 @@ def create_task(current_user_id):
         db.session.add(task)
         db.session.commit()
         
-        logger.info(f'Task created successfully: {task.id}, difficulty: {task.difficulty}, images: {task.images}')
+        logger.info(f'Task created successfully: {task.id}, category: {task.category}, difficulty: {task.difficulty}, images: {task.images}')
         
         # --- Job Alerts: notify nearby users asynchronously ---
         # Runs after commit so the task has an ID. Wrapped in try/except
@@ -497,7 +504,11 @@ def update_task(current_user_id, task_id):
             task.description = data['description'].strip()
         
         if 'category' in data:
-            task.category = data['category']
+            # Validate & normalize category
+            category, cat_error = validate_category(data['category'])
+            if cat_error:
+                return jsonify({'error': cat_error}), 400
+            task.category = category
         
         if 'location' in data and data['location'].strip():
             task.location = data['location'].strip()
