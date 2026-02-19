@@ -7,7 +7,6 @@ from app.utils import token_required, get_display_name, send_push_safe
 from app.socket_events import emit_new_message
 from datetime import datetime
 from sqlalchemy import or_, and_, func
-import traceback
 import logging
 
 messages_bp = Blueprint('messages', __name__)
@@ -47,9 +46,7 @@ def get_conversations(current_user_id):
             'total': len(conversations)
         }), 200
     except Exception as e:
-        logger.error(f"Error in get_conversations: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/conversations', methods=['POST'])
@@ -169,9 +166,7 @@ def create_conversation(current_user_id):
         }), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error in create_conversation: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/conversations/<int:conversation_id>', methods=['GET'])
@@ -197,9 +192,7 @@ def get_conversation(current_user_id, conversation_id):
             'conversation': conversation.to_dict(current_user_id)
         }), 200
     except Exception as e:
-        logger.error(f"Error in get_conversation: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/conversations/<int:conversation_id>/messages', methods=['GET'])
@@ -251,9 +244,7 @@ def get_messages(current_user_id, conversation_id):
         }), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error in get_messages: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/conversations/<int:conversation_id>/messages', methods=['POST'])
@@ -355,9 +346,7 @@ def send_message(current_user_id, conversation_id):
         }), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error in send_message: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/messages/<int:message_id>/read', methods=['PUT'])
@@ -390,9 +379,7 @@ def mark_message_read(current_user_id, message_id):
         }), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error in mark_message_read: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/conversations/<int:conversation_id>/read-all', methods=['PUT'])
@@ -427,9 +414,7 @@ def mark_all_read(current_user_id, conversation_id):
         }), 200
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error in mark_all_read: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @messages_bp.route('/unread-count', methods=['GET'])
@@ -458,6 +443,5 @@ def get_unread_count(current_user_id):
         }), 200
     except Exception as e:
         logger.error(f"Error in get_unread_count: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
         # Return 0 instead of 500 — this is a non-critical polling endpoint
         return jsonify({'unread_count': 0}), 200
