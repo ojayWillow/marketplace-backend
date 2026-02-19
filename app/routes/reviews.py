@@ -11,7 +11,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import func, case
 from app import db
 from app.models import Review, User, Listing, TaskRequest
-from app.utils import token_required, token_optional, get_display_name, send_push_safe
+from app.utils import token_required, token_optional, get_display_name
 from datetime import datetime
 
 reviews_bp = Blueprint('reviews', __name__, url_prefix='/api/reviews')
@@ -234,33 +234,19 @@ def create_task_review(current_user_id, task_id):
         db.session.commit()
         
         # --- Notify the reviewed user ---
+        # Unified: in-app + push handled by create_notification()
         reviewer = User.query.get(current_user_id)
         reviewer_name = get_display_name(reviewer)
         task_title = task.title
         rating = data['rating']
         
-        # Push notification
-        try:
-            from app.services.push_notifications import notify_new_review as push_notify_review
-            send_push_safe(
-                push_notify_review,
-                user_id=reviewed_user_id,
-                reviewer_name=reviewer_name,
-                task_title=task_title,
-                task_id=task_id,
-                rating=rating
-            )
-        except Exception as push_err:
-            print(f"Push review notification skipped (non-critical): {push_err}")
-        
-        # In-app notification
         try:
             from app.routes.notifications import notify_new_review as inapp_notify_review
             inapp_notify_review(reviewed_user_id, reviewer_name, task_title, task_id, rating)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"In-app review notification skipped (non-critical): {notify_error}")
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         # Reload with relationships for response
         review = Review.query.options(
@@ -299,7 +285,6 @@ def get_user_review_stats(user_id):
             return jsonify({'error': 'User not found'}), 404
         
         # Query 1: Overall stats + rating breakdown in ONE query
-        # Uses conditional aggregation to get count per rating bucket
         stats = db.session.query(
             func.count(Review.id).label('total'),
             func.avg(Review.rating).label('avg_rating'),
@@ -344,7 +329,6 @@ def get_user_review_stats(user_id):
         
         type_map = {row.review_type: row for row in type_stats}
         
-        # client_review = reviews left by clients about this worker
         worker_row = type_map.get('client_review')
         client_row = type_map.get('worker_review')
         
