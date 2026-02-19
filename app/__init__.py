@@ -4,6 +4,8 @@ from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_socketio import SocketIO
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 import jwt
 from dotenv import load_dotenv
@@ -14,6 +16,11 @@ db = SQLAlchemy()
 migrate = Migrate()
 jwt_manager = JWTManager()
 socketio = SocketIO()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -45,6 +52,9 @@ def create_app(config_name=None):
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
+    # Reject request bodies larger than 16MB before they're read into memory
+    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+    
     # JWT Configuration — NO insecure fallback
     jwt_secret = os.environ.get('JWT_SECRET_KEY')
     if not jwt_secret:
@@ -67,6 +77,11 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt_manager.init_app(app)
+    limiter.init_app(app)
+    
+    # Disable rate limiting in test environment
+    if config_name == 'testing':
+        limiter.enabled = False
     
     # Allowed origins for CORS
     allowed_origins = [

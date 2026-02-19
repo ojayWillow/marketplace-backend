@@ -1,13 +1,14 @@
 """Authentication routes for user registration and login."""
 
 from flask import Blueprint, request, jsonify, current_app
-from app import db
+from app import db, limiter
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
 from app.services.vonage_sms import send_verification_code, verify_code, normalize_phone_number
 from app.utils import token_required
 from datetime import datetime, timedelta
 import jwt
+import re
 import traceback
 import secrets
 import string
@@ -15,6 +16,12 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import func, or_
 
 auth_bp = Blueprint('auth', __name__)
+
+# Email validation regex
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+
+# Username validation: 3-30 chars, alphanumeric + underscores
+USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_]{3,30}$')
 
 
 def _get_secret_key():
@@ -34,6 +41,7 @@ def generate_temp_password():
 
 
 @auth_bp.route('/register', methods=['POST'])
+@limiter.limit("5 per minute")
 def register():
     """Register a new user account."""
     try:
@@ -42,23 +50,50 @@ def register():
         if not data or not all(k in data for k in ['username', 'email', 'password']):
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # Validate password length (consistent with reset-password)
-        if len(data['password']) < 6:
+        username = data['username'].strip()
+        email = data['email'].strip().lower()
+        password = data['password']
+        first_name = data.get('first_name', '').strip() if data.get('first_name') else None
+        last_name = data.get('last_name', '').strip() if data.get('last_name') else None
+        
+        # Validate username: 3-30 chars, alphanumeric + underscores
+        if not USERNAME_REGEX.match(username):
+            return jsonify({'error': 'Username must be 3-30 characters and contain only letters, numbers, and underscores'}), 400
+        
+        # Validate email format
+        if not EMAIL_REGEX.match(email):
+            return jsonify({'error': 'Invalid email format'}), 400
+        
+        if len(email) > 254:
+            return jsonify({'error': 'Email is too long'}), 400
+        
+        # Validate password: 6-128 chars
+        if len(password) < 6:
             return jsonify({'error': 'Password must be at least 6 characters'}), 400
         
-        if User.query.filter_by(username=data['username']).first():
+        if len(password) > 128:
+            return jsonify({'error': 'Password must be less than 128 characters'}), 400
+        
+        # Validate optional name fields
+        if first_name and len(first_name) > 50:
+            return jsonify({'error': 'First name must be less than 50 characters'}), 400
+        
+        if last_name and len(last_name) > 50:
+            return jsonify({'error': 'Last name must be less than 50 characters'}), 400
+        
+        if User.query.filter_by(username=username).first():
             return jsonify({'error': 'Username already exists'}), 409
         
-        if User.query.filter_by(email=data['email']).first():
+        if User.query.filter_by(email=email).first():
             return jsonify({'error': 'Email already exists'}), 409
         
         user = User(
-            username=data['username'],
-            email=data['email'],
-            first_name=data.get('first_name'),
-            last_name=data.get('last_name')
+            username=username,
+            email=email,
+            first_name=first_name,
+            last_name=last_name
         )
-        user.set_password(data['password'])
+        user.set_password(password)
         
         db.session.add(user)
         db.session.commit()
@@ -82,6 +117,7 @@ def register():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@limiter.limit("10 per minute")
 def login():
     """Authenticate user and return JWT token."""
     try:
@@ -119,6 +155,7 @@ def login():
 # ============================================================================
 
 @auth_bp.route('/phone/send-otp', methods=['POST'])
+@limiter.limit("3 per minute")
 def phone_send_otp():
     """Send OTP verification code to phone number via Vonage."""
     try:
@@ -157,6 +194,7 @@ def phone_send_otp():
 
 
 @auth_bp.route('/phone/verify-otp', methods=['POST'])
+@limiter.limit("5 per minute")
 def phone_verify_otp():
     """Verify OTP code and create/login user."""
     try:
@@ -546,6 +584,7 @@ def complete_registration(current_user_id):
 # ============================================================================
 
 @auth_bp.route('/forgot-password', methods=['POST'])
+@limiter.limit("3 per minute")
 def forgot_password():
     """Request a password reset email."""
     try:
