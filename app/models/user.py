@@ -58,6 +58,9 @@ class User(db.Model):
     # Stores: { enabled: bool, radius_km: float, categories: list[str] }
     job_alert_preferences = db.Column(db.Text, nullable=True)
     
+    # Onboarding
+    onboarding_completed = db.Column(db.Boolean, default=False, nullable=False)
+    
     # Relationships
     listings = db.relationship('Listing', backref='seller', lazy='dynamic', foreign_keys='Listing.seller_id')
     task_requests = db.relationship('TaskRequest', backref='creator', lazy='dynamic', foreign_keys='TaskRequest.creator_id')
@@ -251,6 +254,7 @@ class User(db.Model):
             'online_status': self.get_online_status(),
             'last_seen_display': self.get_last_seen_display(),
             'job_alert_preferences': self.get_job_alert_prefs(),
+            'onboarding_completed': self.onboarding_completed,
         }
     
     def to_public_dict(self):
