@@ -3,13 +3,7 @@
 from flask import request, jsonify
 from app import db
 from app.models import TaskRequest, User
-from app.services.push_notifications import (
-    notify_task_marked_done,
-    notify_task_confirmed,
-    notify_task_disputed as push_notify_disputed,
-    notify_task_cancelled as push_notify_cancelled
-)
-from app.utils import token_required, get_display_name, send_push_safe
+from app.utils import token_required, get_display_name
 from app.routes.tasks import tasks_bp
 from datetime import datetime
 
@@ -39,21 +33,15 @@ def mark_task_done(current_user_id, task_id):
         
         worker = User.query.get(current_user_id)
         worker_name = get_display_name(worker)
-        send_push_safe(
-            notify_task_marked_done,
-            task_owner_id=creator_id,
-            worker_name=worker_name,
-            task_title=task_title,
-            task_id=task_id
-        )
         
+        # Unified: in-app + push handled by create_notification()
         try:
             from app.routes.notifications import notify_task_marked_done as inapp_notify_done
             inapp_notify_done(creator_id, worker_name, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"In-app notification skipped (non-critical): {notify_error}")
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task marked as done. Waiting for creator confirmation.',
@@ -88,15 +76,7 @@ def confirm_task_completion(current_user_id, task_id):
         worker_id = task.assigned_to_id
         task_title = task.title
         
-        # Push notification to worker: task confirmed
-        send_push_safe(
-            notify_task_confirmed,
-            worker_id=worker_id,
-            task_title=task_title,
-            task_id=task_id
-        )
-        
-        # In-app notifications
+        # Unified: in-app + push handled by create_notification()
         try:
             from app.routes.notifications import (
                 notify_task_completed as inapp_notify_completed,
@@ -119,7 +99,7 @@ def confirm_task_completion(current_user_id, task_id):
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"In-app notification skipped (non-critical): {notify_error}")
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task completed! Both parties can now leave reviews.',
@@ -155,16 +135,7 @@ def dispute_task(current_user_id, task_id):
         task_title = task.title
         worker_id = task.assigned_to_id
         
-        # Push notification to the worker
-        if worker_id:
-            send_push_safe(
-                push_notify_disputed,
-                user_id=worker_id,
-                task_title=task_title,
-                task_id=task_id
-            )
-        
-        # In-app notification to the worker
+        # Unified: in-app + push handled by create_notification()
         if worker_id:
             try:
                 from app.routes.notifications import notify_task_disputed as inapp_notify_disputed
@@ -172,7 +143,7 @@ def dispute_task(current_user_id, task_id):
                 db.session.commit()
             except Exception as notify_error:
                 db.session.rollback()
-                print(f"In-app dispute notification skipped (non-critical): {notify_error}")
+                print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task has been disputed. Please resolve with the worker.',
@@ -205,33 +176,15 @@ def cancel_task(current_user_id, task_id):
         task.updated_at = datetime.utcnow()
         db.session.commit()
         
-        # Notify the assigned worker (if any) that the task was cancelled
+        # Unified: in-app + push handled by create_notification()
         if worker_id:
-            # Push notification
-            send_push_safe(
-                push_notify_cancelled,
-                user_id=worker_id,
-                task_title=task_title,
-                task_id=task_id
-            )
-            
-            # In-app notification
             try:
-                from app.routes.notifications import create_notification
-                from app.models import NotificationType
-                create_notification(
-                    user_id=worker_id,
-                    notification_type=NotificationType.TASK_CANCELLED,
-                    title='\u274c Task Cancelled',
-                    message=f'The task "{task_title}" has been cancelled by the creator.',
-                    related_type='task',
-                    related_id=task_id,
-                    data={'task_title': task_title}
-                )
+                from app.routes.notifications import notify_task_cancelled
+                notify_task_cancelled(worker_id, task_title, task_id)
                 db.session.commit()
             except Exception as notify_error:
                 db.session.rollback()
-                print(f"In-app cancel notification skipped (non-critical): {notify_error}")
+                print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Task has been cancelled.',

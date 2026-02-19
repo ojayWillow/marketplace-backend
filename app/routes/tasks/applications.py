@@ -3,12 +3,7 @@
 from flask import request, jsonify
 from app import db
 from app.models import TaskRequest, User, TaskApplication
-from app.services.push_notifications import (
-    notify_application_received,
-    notify_application_accepted,
-    notify_application_rejected
-)
-from app.utils import token_required, get_display_name, send_push_safe
+from app.utils import token_required, get_display_name
 from app.routes.tasks import tasks_bp
 from app.routes.tasks.helpers import translate_task_if_needed
 from datetime import datetime
@@ -55,21 +50,15 @@ def apply_to_task(current_user_id, task_id):
         
         applicant = User.query.get(current_user_id)
         applicant_name = get_display_name(applicant)
-        send_push_safe(
-            notify_application_received,
-            task_owner_id=creator_id,
-            applicant_name=applicant_name,
-            task_title=task_title,
-            task_id=task_id
-        )
         
+        # Unified: in-app + push notification handled by create_notification()
         try:
             from app.routes.notifications import notify_new_application
             notify_new_application(creator_id, applicant_name, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"In-app notification skipped (non-critical): {notify_error}")
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application submitted successfully',
@@ -156,27 +145,14 @@ def accept_application(current_user_id, task_id, application_id):
         accepted_applicant_id = application.applicant_id
         task_title = task.title
         
-        send_push_safe(
-            notify_application_accepted,
-            applicant_id=accepted_applicant_id,
-            task_title=task_title,
-            task_id=task_id
-        )
-        
-        for rejected_id in rejected_applicant_ids:
-            send_push_safe(
-                notify_application_rejected,
-                applicant_id=rejected_id,
-                task_title=task_title
-            )
-        
+        # Unified: in-app + push handled by create_notification()
         try:
             from app.routes.notifications import notify_application_accepted as inapp_notify_accepted
             inapp_notify_accepted(accepted_applicant_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"In-app accepted notification skipped (non-critical): {notify_error}")
+            print(f"Accepted notification skipped (non-critical): {notify_error}")
         
         for rejected_id in rejected_applicant_ids:
             try:
@@ -185,7 +161,7 @@ def accept_application(current_user_id, task_id, application_id):
                 db.session.commit()
             except Exception as notify_error:
                 db.session.rollback()
-                print(f"In-app rejected notification skipped (non-critical): {notify_error}")
+                print(f"Rejected notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application accepted and task assigned',
@@ -223,19 +199,14 @@ def reject_application(current_user_id, task_id, application_id):
         task_title = task.title
         application_dict = application.to_dict()
         
-        send_push_safe(
-            notify_application_rejected,
-            applicant_id=applicant_id,
-            task_title=task_title
-        )
-        
+        # Unified: in-app + push handled by create_notification()
         try:
             from app.routes.notifications import notify_application_rejected as inapp_notify_rejected
             inapp_notify_rejected(applicant_id, task_title, task_id)
             db.session.commit()
         except Exception as notify_error:
             db.session.rollback()
-            print(f"In-app notification skipped (non-critical): {notify_error}")
+            print(f"Notification skipped (non-critical): {notify_error}")
         
         return jsonify({
             'message': 'Application rejected',
