@@ -37,7 +37,7 @@ def create_app(config_name=None):
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['TESTING'] = True
     elif database_url:
-        # Production/Render - use the environment database URL
+        # Production/Railway - use the environment database URL
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     else:
         # Local development fallback
@@ -45,8 +45,20 @@ def create_app(config_name=None):
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
-    # JWT Configuration
-    app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-here')
+    # JWT Configuration — NO insecure fallback
+    jwt_secret = os.environ.get('JWT_SECRET_KEY')
+    if not jwt_secret:
+        if config_name == 'testing':
+            jwt_secret = 'test-secret-key-not-for-production'
+        elif config_name == 'development':
+            jwt_secret = 'dev-secret-key-not-for-production'
+            print('[WARNING] Using development JWT secret. Set JWT_SECRET_KEY env var for production.')
+        else:
+            raise RuntimeError(
+                'JWT_SECRET_KEY environment variable is required in production. '
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+    app.config['JWT_SECRET_KEY'] = jwt_secret
     app.config['JWT_TOKEN_LOCATION'] = ['headers']
     app.config['JWT_HEADER_NAME'] = 'Authorization'
     app.config['JWT_HEADER_TYPE'] = 'Bearer'
@@ -63,8 +75,6 @@ def create_app(config_name=None):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:8081",  # Expo dev
-        "https://marketplace-frontend-tau-seven.vercel.app",
-        "https://marketplace-backend-qmh6.onrender.com",  # Old Render backend
         "https://marketplace-backend-production-e808.up.railway.app",  # Railway backend
         "https://www.kolab.lv",  # Production frontend
         "https://kolab.lv",  # Production frontend (non-www)

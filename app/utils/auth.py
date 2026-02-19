@@ -2,15 +2,20 @@
 
 This module provides JWT authentication decorators that can be used
 across all route files to ensure consistent authentication behavior.
+
+The JWT secret is read from Flask's app config (set in create_app),
+which is the single source of truth. Never read JWT_SECRET_KEY
+from os.getenv directly — always use current_app.config.
 """
 
 from functools import wraps
 from flask import request, jsonify, current_app, g
 import jwt
-import os
 
-# Use JWT_SECRET_KEY consistently across all routes
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
+
+def _get_secret_key():
+    """Get JWT secret from Flask app config (single source of truth)."""
+    return current_app.config['JWT_SECRET_KEY']
 
 
 def token_required(f):
@@ -37,7 +42,7 @@ def token_required(f):
         try:
             # Support both "Bearer <token>" and raw token formats
             token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            payload = jwt.decode(token, _get_secret_key(), algorithms=['HS256'])
             current_user_id = payload['user_id']
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token has expired'}), 401
@@ -75,7 +80,7 @@ def token_optional(f):
         if auth_header:
             try:
                 token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-                payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+                payload = jwt.decode(token, _get_secret_key(), algorithms=['HS256'])
                 current_user_id = payload['user_id']
             except:
                 pass  # Token invalid, but that's ok - it's optional
@@ -114,7 +119,7 @@ def token_required_g(f):
         
         try:
             token = auth_header.split(' ')[1]
-            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            payload = jwt.decode(token, _get_secret_key(), algorithms=['HS256'])
             current_user = User.query.get(payload['user_id'])
             if not current_user:
                 return jsonify({'error': 'User not found'}), 401
@@ -154,7 +159,7 @@ def token_optional_g(f):
         if auth_header and auth_header.startswith('Bearer '):
             try:
                 token = auth_header.split(' ')[1]
-                payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+                payload = jwt.decode(token, _get_secret_key(), algorithms=['HS256'])
                 current_user = User.query.get(payload['user_id'])
                 g.current_user = current_user
             except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):

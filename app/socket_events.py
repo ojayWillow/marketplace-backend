@@ -1,17 +1,18 @@
-"""WebSocket events for real-time messaging and presence tracking."""
+"""WebSocket events for real-time messaging and presence tracking.
+
+The JWT secret is read from Flask's app config via current_app,
+which is the single source of truth set in create_app().
+"""
 
 from flask_socketio import emit, join_room, leave_room
-from flask import request
+from flask import request, current_app
 import jwt
-import os
 from app.models import Conversation, Message, User
 from app import db
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 # In-memory tracking of online users: {user_id: socket_id}
 online_users = {}
@@ -29,7 +30,8 @@ def get_user_from_token(token):
     try:
         if token and token.startswith('Bearer '):
             token = token.split(' ')[1]
-        data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        secret_key = current_app.config['JWT_SECRET_KEY']
+        data = jwt.decode(token, secret_key, algorithms=['HS256'])
         return data.get('user_id')
     except Exception as e:
         logger.error(f"Token decode error: {e}")
@@ -222,13 +224,8 @@ def register_socket_events(socketio):
             if not user_id:
                 return
             
-            # Update last_seen on activity (but don't change is_online)
-            user = User.query.get(user_id)
-            if user:
-                user.last_seen = datetime.utcnow()
-                db.session.commit()
-            
-            # Broadcast to others in the conversation
+            # Broadcast to others in the conversation (no DB write needed —
+            # last_seen is already kept fresh by heartbeat events)
             room = f'conversation_{conversation_id}'
             emit('user_typing', {
                 'user_id': user_id,
