@@ -1,39 +1,16 @@
 """Push notification subscription routes."""
 
 from flask import Blueprint, request, jsonify, current_app
-from functools import wraps
-import jwt
 
 from app import db
 from app.models import PushSubscription
+from app.utils.auth import token_required
 import os
 
 push_bp = Blueprint('push', __name__)
 
 # Get VAPID public key for frontend
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
-
-
-def token_required(f):
-    """Decorator to require valid JWT token."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        
-        if not auth_header:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-            payload = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
-            current_user_id = payload['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Token is invalid', 'details': str(e)}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
 
 
 @push_bp.route('/vapid-public-key', methods=['GET'])
@@ -196,7 +173,7 @@ def send_test_notification(current_user_id):
     
     result = send_push_notification(
         user_id=current_user_id,
-        title='🔔 Test Notification',
+        title='\ud83d\udd14 Test Notification',
         body='Push notifications are working!',
         url='/'
     )
