@@ -1,18 +1,5 @@
 """Routes package for the marketplace application."""
 
-from flask import Blueprint, jsonify
-
-# Create a simple health blueprint for /api/health
-health_bp = Blueprint('health', __name__)
-
-@health_bp.route('/health', methods=['GET'])
-def api_health():
-    """Health check endpoint at /api/health"""
-    return jsonify({
-        'status': 'ok',
-        'message': 'Backend is running!',
-        'version': '1.0.0'
-    }), 200
 
 def register_routes(app):
     """Register all route blueprints with the application."""
@@ -30,10 +17,7 @@ def register_routes(app):
     from .disputes import disputes_bp
     from .onboarding import onboarding_bp
 
-    # Register health check at /api/health
-    app.register_blueprint(health_bp, url_prefix='/api')
-    
-    # Register all other blueprints
+    # Register all blueprints with consistent url_prefix pattern
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(listings_bp, url_prefix='/api/listings')
     app.register_blueprint(tasks_bp, url_prefix='/api/tasks')
@@ -42,7 +26,7 @@ def register_routes(app):
     app.register_blueprint(messages_bp, url_prefix='/api/messages')
     app.register_blueprint(offerings_bp, url_prefix='/api/offerings')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
-    app.register_blueprint(favorites_bp)  # Routes already have /api/favorites prefix
+    app.register_blueprint(favorites_bp, url_prefix='/api/favorites')
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
     app.register_blueprint(push_bp, url_prefix='/api/push')
     app.register_blueprint(disputes_bp, url_prefix='/api/disputes')
