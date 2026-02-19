@@ -8,6 +8,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import os
 import jwt
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,6 +22,8 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"],
     storage_uri="memory://",
 )
+
+logger = logging.getLogger(__name__)
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -223,6 +226,35 @@ def create_app(config_name=None):
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization", "Accept"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
+    
+    # ========================================================================
+    # GLOBAL ERROR HANDLERS
+    # ========================================================================
+    
+    @app.errorhandler(413)
+    def request_entity_too_large(error):
+        """Handle requests exceeding MAX_CONTENT_LENGTH."""
+        return jsonify({'error': 'File too large. Maximum size is 16MB.'}), 413
+    
+    @app.errorhandler(429)
+    def ratelimit_handler(error):
+        """Handle rate limit exceeded."""
+        return jsonify({'error': 'Too many requests. Please try again later.'}), 429
+    
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error):
+        """Catch-all handler: log the real error, return a safe generic message.
+        
+        In development, the actual error message is returned for debugging.
+        In production/testing, only 'Internal server error' is returned.
+        """
+        logger.error(f"Unhandled exception on {request.method} {request.path}: "
+                     f"{type(error).__name__}: {error}", exc_info=True)
+        
+        if is_development:
+            return jsonify({'error': str(error)}), 500
+        
+        return jsonify({'error': 'Internal server error'}), 500
     
     # Middleware to update user's last_seen on authenticated requests
     @app.before_request
