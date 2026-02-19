@@ -71,7 +71,7 @@ def register_socket_events(socketio):
                 # Track in memory for quick lookups
                 online_users[user_id] = request.sid
                 
-                logger.info(f'✅ User {user_id} ({user.username}) CONNECTED: {request.sid}')
+                logger.info(f'\u2705 User {user_id} ({user.username}) CONNECTED: {request.sid}')
                 
                 # Emit to the connecting user
                 emit('connected', {
@@ -81,13 +81,13 @@ def register_socket_events(socketio):
                 })
                 
                 # Broadcast ONLINE status to all other users
-                # Emit both event names for compatibility
+                # Emit both event names for frontend compatibility
                 status_data = {
                     'user_id': user_id,
                     'is_online': True,
                     'online_status': 'online',
-                    'status': 'online',  # Frontend expects this field
-                    'last_seen': None,  # Don't show "last seen" when online
+                    'status': 'online',
+                    'last_seen': None,
                     'timestamp': utc_isoformat(datetime.utcnow())
                 }
                 
@@ -129,15 +129,15 @@ def register_socket_events(socketio):
                 
                 last_seen_display = user.get_last_seen_display()
                 
-                logger.info(f'❌ User {user_id} ({user.username}) DISCONNECTED: {request.sid}')
+                logger.info(f'\u274c User {user_id} ({user.username}) DISCONNECTED: {request.sid}')
                 
                 # Broadcast OFFLINE status to all users
-                # Emit both event names for compatibility
+                # Emit both event names for frontend compatibility
                 status_data = {
                     'user_id': user_id,
                     'is_online': False,
                     'online_status': 'offline',
-                    'status': 'offline',  # Frontend expects this field
+                    'status': 'offline',
                     'last_seen': utc_isoformat(user.last_seen),
                     'last_seen_display': last_seen_display,
                     'timestamp': utc_isoformat(datetime.utcnow())
@@ -224,7 +224,7 @@ def register_socket_events(socketio):
             if not user_id:
                 return
             
-            # Broadcast to others in the conversation (no DB write needed —
+            # Broadcast to others in the conversation (no DB write needed \u2014
             # last_seen is already kept fresh by heartbeat events)
             room = f'conversation_{conversation_id}'
             emit('user_typing', {
@@ -261,35 +261,9 @@ def register_socket_events(socketio):
         except Exception as e:
             logger.error(f'Heartbeat error: {e}', exc_info=True)
     
-    @socketio.on('get_presence')
-    def handle_get_presence(data):
-        """Get online status for specific users (legacy event name)."""
-        try:
-            user_ids = data.get('user_ids', [])
-            if not isinstance(user_ids, list):
-                user_ids = [user_ids]
-            
-            presence_data = []
-            for target_user_id in user_ids:
-                user = User.query.get(target_user_id)
-                if user:
-                    presence_data.append({
-                        'user_id': user.id,
-                        'is_online': user.is_online,
-                        'online_status': user.get_online_status(),
-                        'status': 'online' if user.is_online else 'offline',
-                        'last_seen': utc_isoformat(user.last_seen),
-                        'last_seen_display': user.get_last_seen_display()
-                    })
-            
-            emit('presence_data', {'users': presence_data})
-            
-        except Exception as e:
-            logger.error(f'Get presence error: {e}', exc_info=True)
-    
     @socketio.on('get_user_status')
     def handle_get_user_status(data):
-        """Get online status for a single user (frontend expected event name)."""
+        """Get online status for a single user."""
         try:
             user_id = data.get('user_id')
             if not user_id:
