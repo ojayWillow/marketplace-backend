@@ -5,12 +5,13 @@ from app.models import User, TaskRequest, Dispute, Notification, NotificationTyp
 from app.utils.auth import token_required
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_, cast, Date
+import hmac
 import os
 
 admin_bp = Blueprint('admin', __name__)
 
-# Simple admin secret for DB operations
-ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'tirgus-admin-2026')
+# Admin secret for DB operations — MUST be set via env var, no default
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET')
 
 # Admin emails whitelist
 ADMIN_EMAILS = [
@@ -20,9 +21,17 @@ ADMIN_EMAILS = [
 
 
 def check_admin_secret():
-    """Check if request has valid admin secret."""
-    secret = request.headers.get('X-Admin-Secret') or request.args.get('secret')
-    return secret == ADMIN_SECRET
+    """Check if request has valid admin secret via header only.
+    
+    Uses hmac.compare_digest for timing-safe comparison.
+    Query parameter authentication removed — secrets in URLs leak via
+    server logs, browser history, and Referer headers.
+    """
+    if not ADMIN_SECRET:
+        # If ADMIN_SECRET env var is not set, disable secret-based endpoints
+        return False
+    secret = request.headers.get('X-Admin-Secret', '')
+    return hmac.compare_digest(secret, ADMIN_SECRET)
 
 
 def check_admin_user(current_user_id):
@@ -685,7 +694,7 @@ def init_database():
         db.create_all()
         return jsonify({'status': 'success', 'message': 'Database tables created successfully!'}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Database initialization failed'}), 500
 
 
 @admin_bp.route('/migrate-db', methods=['GET', 'POST'])
@@ -716,12 +725,12 @@ def migrate_database():
                 else:
                     results.append(f"Column {table}.{column} already exists")
             except Exception as e:
-                results.append(f"Error with {table}.{column}: {str(e)}")
+                results.append(f"Error with {table}.{column}")
                 db.session.rollback()
         
         return jsonify({'status': 'success', 'message': 'Migration completed!', 'details': results}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Migration failed: {str(e)}', 'details': results}), 500
+        return jsonify({'status': 'error', 'message': 'Migration failed', 'details': results}), 500
 
 
 @admin_bp.route('/db-status', methods=['GET'])
@@ -731,4 +740,4 @@ def database_status():
         db.session.execute(db.text('SELECT 1'))
         return jsonify({'status': 'ok', 'database': 'connected'}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'database': 'disconnected', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'database': 'disconnected'}), 500
