@@ -6,18 +6,19 @@ including geo-search with smart radius expansion.
 
 import logging
 from datetime import datetime
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import request, jsonify, current_app
 from sqlalchemy import func, or_, and_, text
 from sqlalchemy.orm import joinedload
 
 from app import db
 from app.models import TaskRequest, TaskApplication, User, Notification, NotificationType, Review
 from app.utils.auth import token_required
-from app.utils.geo import distance, get_bounding_box
+from app.routes.tasks.helpers import distance, get_bounding_box
 
 logger = logging.getLogger(__name__)
 
-tasks_crud_bp = Blueprint('tasks_crud', __name__)
+# Use the shared blueprint from tasks/__init__.py
+from app.routes.tasks import tasks_bp
 
 # ---------------------------------------------------------------------------
 # Category helpers
@@ -116,7 +117,7 @@ def _find_tasks_within_radius(base_query, latitude, longitude, radius_km):
 # LIST / SEARCH
 # ---------------------------------------------------------------------------
 
-@tasks_crud_bp.route('', methods=['GET'])
+@tasks_bp.route('', methods=['GET'])
 def get_tasks():
     """List tasks with optional filters.
 
@@ -193,7 +194,7 @@ def get_tasks():
                     if len(tasks_with_distance) >= min_results:
                         break
                 else:
-                    # Even 200km wasn’t enough — return all geo tasks sorted by distance
+                    # Even 200km wasn't enough — return all geo tasks sorted by distance
                     all_geo_tasks = query.filter(
                         TaskRequest.latitude.isnot(None),
                         TaskRequest.longitude.isnot(None),
@@ -289,7 +290,7 @@ def get_tasks():
         return jsonify({'error': str(e)}), 500
 
 
-@tasks_crud_bp.route('/<int:task_id>', methods=['GET'])
+@tasks_bp.route('/<int:task_id>', methods=['GET'])
 def get_task(task_id):
     """Get a specific task by ID, including creator info and review stats."""
     try:
@@ -325,7 +326,7 @@ def get_task(task_id):
 # CREATE / UPDATE / DELETE
 # ---------------------------------------------------------------------------
 
-@tasks_crud_bp.route('', methods=['POST'])
+@tasks_bp.route('', methods=['POST'])
 @token_required
 def create_task(current_user_id):
     """Create a new task request.
@@ -424,9 +425,9 @@ def create_task(current_user_id):
         try:
             from app.models import JobAlertPreference
 
-            # Query all alert preferences that match this task’s category
+            # Query all alert preferences that match this task's category
             matching_prefs = JobAlertPreference.query.filter(
-                JobAlertPreference.user_id != current_user_id,  # Don’t notify creator
+                JobAlertPreference.user_id != current_user_id,  # Don't notify creator
                 JobAlertPreference.is_active == True,
             ).all()
 
@@ -464,7 +465,7 @@ def create_task(current_user_id):
             logger.debug('JobAlertPreference not available — skipping job alerts')
         except Exception as alert_err:
             logger.warning(f'Job alert notifications failed (non-fatal): {alert_err}')
-            # Don’t rollback the task creation
+            # Don't rollback the task creation
 
         return jsonify(task.to_dict()), 201
 
@@ -473,7 +474,7 @@ def create_task(current_user_id):
         return jsonify({'error': str(e)}), 500
 
 
-@tasks_crud_bp.route('/<int:task_id>', methods=['PUT'])
+@tasks_bp.route('/<int:task_id>', methods=['PUT'])
 @token_required
 def update_task(current_user_id, task_id):
     """Update an existing task request.
