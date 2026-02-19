@@ -1,11 +1,14 @@
 """Notification routes for user notifications."""
 
 import traceback
+import logging
 from flask import Blueprint, request, jsonify
 from app import db
 from app.models import Notification, NotificationType
 from app.utils import token_required
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 notifications_bp = Blueprint('notifications', __name__)
 
@@ -315,12 +318,74 @@ def update_job_alert_preferences(current_user_id):
         return jsonify({'error': str(e)}), 500
 
 
+# ============ PUSH CONFIG PER NOTIFICATION TYPE ============
+# Defines how each notification type maps to a push notification.
+# title_template can use {data_key} placeholders from the notification data dict.
+# url_template can use {related_id} for the related entity ID.
+
+PUSH_CONFIG = {
+    NotificationType.APPLICATION_ACCEPTED: {
+        'title': '\U0001f389 Application Accepted!',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'accepted',
+    },
+    NotificationType.APPLICATION_REJECTED: {
+        'title': 'Application Update',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'rejected',
+    },
+    NotificationType.NEW_APPLICATION: {
+        'title': '\U0001f44b New Application!',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'application',
+    },
+    NotificationType.TASK_MARKED_DONE: {
+        'title': '\u2705 Task Completed',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'done',
+    },
+    NotificationType.TASK_COMPLETED: {
+        'title': '\U0001f31f Great job!',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'confirmed',
+    },
+    NotificationType.REVIEW_REMINDER: {
+        'title': '\u2b50 Leave a Review',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'review-reminder',
+    },
+    NotificationType.TASK_DISPUTED: {
+        'title': '\u26a0\ufe0f Task Disputed',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'disputed',
+    },
+    NotificationType.TASK_CANCELLED: {
+        'title': '\u274c Task Cancelled',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'cancelled',
+    },
+    NotificationType.NEW_REVIEW: {
+        'title': '\u2b50 New Review!',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'review',
+    },
+    NotificationType.NEW_TASK_NEARBY: {
+        'title': '\U0001f4bc New Job Nearby!',
+        'url_template': '/tasks/{related_id}',
+        'tag_prefix': 'new-job-nearby',
+    },
+}
+
+
 # ============ HELPER FUNCTIONS FOR CREATING NOTIFICATIONS ============
 
 def create_notification(user_id: int, notification_type: str, title: str, message: str, 
                        related_type: str = None, related_id: int = None,
-                       data: dict = None) -> Notification:
-    """Helper function to create a notification.
+                       data: dict = None, send_push: bool = True) -> Notification:
+    """Helper function to create a notification AND send a push notification.
+    
+    Every in-app notification automatically triggers a browser push notification
+    unless send_push=False is passed.
     
     Args:
         user_id: The ID of the user to notify
@@ -330,6 +395,7 @@ def create_notification(user_id: int, notification_type: str, title: str, messag
         related_type: Type of related entity ('task', 'application', etc.)
         related_id: ID of the related entity
         data: Dictionary with dynamic values for i18n (task_title, applicant_name, etc.)
+        send_push: Whether to also send a browser push notification (default True)
     
     Returns:
         The created Notification object
@@ -347,6 +413,34 @@ def create_notification(user_id: int, notification_type: str, title: str, messag
         notification.set_data(data)
     
     db.session.add(notification)
+    
+    # --- Automatically send push notification ---
+    if send_push:
+        try:
+            from app.services.push_notifications import send_push_notification
+            
+            config = PUSH_CONFIG.get(notification_type, {})
+            push_title = config.get('title', title)
+            
+            # Build URL from template
+            url_template = config.get('url_template', '/')
+            push_url = url_template.format(related_id=related_id) if related_id else '/'
+            
+            # Build tag
+            tag_prefix = config.get('tag_prefix', 'notification')
+            push_tag = f'{tag_prefix}-{related_id}' if related_id else tag_prefix
+            
+            send_push_notification(
+                user_id=user_id,
+                title=push_title,
+                body=message,
+                url=push_url,
+                tag=push_tag,
+            )
+        except Exception as e:
+            # Push failure should never block in-app notification creation
+            logger.error(f'[NOTIFICATIONS] Push notification failed for user {user_id}: {e}')
+    
     return notification
 
 
@@ -484,7 +578,7 @@ def notify_new_task_nearby(user_id: int, task_title: str, task_id: int,
         task_id: ID of the new task
         category_key: Raw category key (e.g. 'cleaning') — frontend translates
         distance_km: Distance in km from user to task
-        budget: Optional budget string (e.g. '€25' or '€15/hr')
+        budget: Optional budget string (e.g. '\u20ac25' or '\u20ac15/hr')
         location: Optional location name
     """
     dist_display = f'{distance_km:.1f} km'
