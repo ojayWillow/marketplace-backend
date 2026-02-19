@@ -132,10 +132,12 @@ def create_app(config_name=None):
                 Message.__table__.create(db.engine, checkfirst=True)
                 print("[STARTUP] Messages tables created manually")
             
-            # MIGRATION: Add attachment columns to messages table if they don't exist
-            # Skip for SQLite (testing) since db.create_all() handles it
+            # MIGRATION: Add new columns to existing tables if they don't exist
+            # db.create_all() only creates NEW tables — it won't add columns to existing ones.
+            # This block handles that for production PostgreSQL.
             if not app.config.get('TESTING', False):
                 try:
+                    # --- messages table migrations ---
                     columns = [col['name'] for col in inspector.get_columns('messages')]
                     print(f"[STARTUP] Messages table columns: {columns}")
                     
@@ -150,6 +152,16 @@ def create_app(config_name=None):
                         db.session.execute(db.text('ALTER TABLE messages ADD COLUMN attachment_type VARCHAR(20)'))
                         db.session.commit()
                         print("[STARTUP] ✓ Added attachment_type column")
+                    
+                    # --- users table migrations ---
+                    user_columns = [col['name'] for col in inspector.get_columns('users')]
+                    print(f"[STARTUP] Users table columns: {user_columns}")
+                    
+                    if 'onboarding_completed' not in user_columns:
+                        print("[STARTUP] Adding onboarding_completed column to users table...")
+                        db.session.execute(db.text('ALTER TABLE users ADD COLUMN onboarding_completed BOOLEAN NOT NULL DEFAULT false'))
+                        db.session.commit()
+                        print("[STARTUP] ✓ Added onboarding_completed column")
                         
                 except Exception as migration_error:
                     print(f"[STARTUP] Migration error: {migration_error}")
