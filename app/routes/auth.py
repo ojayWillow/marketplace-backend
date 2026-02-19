@@ -6,7 +6,6 @@ from app.models import User, Review, PasswordResetToken, Listing, Offering, Task
 from app.services.email import email_service
 from app.services.vonage_sms import send_verification_code, verify_code, normalize_phone_number
 from app.utils import token_required
-from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
 import jwt
 import traceback
@@ -16,6 +15,11 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import func, or_
 
 auth_bp = Blueprint('auth', __name__)
+
+
+def _get_secret_key():
+    """Get JWT secret from Flask app config (single source of truth)."""
+    return current_app.config['JWT_SECRET_KEY']
 
 
 def generate_temp_username():
@@ -65,7 +69,7 @@ def register():
             'username': user.username,
             'exp': datetime.utcnow() + timedelta(hours=24)
         }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        token = jwt.encode(payload, _get_secret_key(), algorithm='HS256')
         
         return jsonify({
             'message': 'User registered successfully',
@@ -99,7 +103,7 @@ def login():
             'username': user.username,
             'exp': datetime.utcnow() + timedelta(hours=24)
         }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        token = jwt.encode(payload, _get_secret_key(), algorithm='HS256')
         
         return jsonify({
             'message': 'Login successful',
@@ -210,7 +214,7 @@ def phone_verify_otp():
             'username': user.username,
             'exp': datetime.utcnow() + timedelta(hours=24)
         }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        token = jwt.encode(payload, _get_secret_key(), algorithm='HS256')
         
         return jsonify({
             'success': True,
@@ -388,7 +392,7 @@ def phone_verify():
             'username': user.username,
             'exp': datetime.utcnow() + timedelta(hours=24)
         }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        token = jwt.encode(payload, _get_secret_key(), algorithm='HS256')
         
         return jsonify({
             'message': 'Phone verification successful',
@@ -523,7 +527,7 @@ def complete_registration(current_user_id):
             'username': user.username,
             'exp': datetime.utcnow() + timedelta(hours=24)
         }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        token = jwt.encode(payload, _get_secret_key(), algorithm='HS256')
         
         return jsonify({
             'message': 'Registration completed successfully',
