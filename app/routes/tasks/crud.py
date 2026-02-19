@@ -7,8 +7,7 @@ including geo-search with smart radius expansion.
 import logging
 from datetime import datetime
 from flask import request, jsonify, current_app
-from sqlalchemy import func, or_, and_, text
-from sqlalchemy.orm import joinedload
+from sqlalchemy import func, or_
 
 from app import db
 from app.models import TaskRequest, TaskApplication, User, Notification, NotificationType, Review
@@ -287,7 +286,7 @@ def get_tasks():
             }), 200
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @tasks_bp.route('/<int:task_id>', methods=['GET'])
@@ -319,7 +318,7 @@ def get_task(task_id):
 
         return jsonify(task_data), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -357,10 +356,10 @@ def create_task(current_user_id):
         # Validate text field lengths
         if len(data['title']) > 200:
             return jsonify({'error': 'Title must be less than 200 characters'}), 400
-        
+
         if len(data['description']) > 5000:
             return jsonify({'error': 'Description must be less than 5000 characters'}), 400
-        
+
         if len(data['location']) > 200:
             return jsonify({'error': 'Location must be less than 200 characters'}), 400
 
@@ -471,7 +470,7 @@ def create_task(current_user_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @tasks_bp.route('/<int:task_id>', methods=['PUT'])
@@ -570,4 +569,4 @@ def update_task(current_user_id, task_id):
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
