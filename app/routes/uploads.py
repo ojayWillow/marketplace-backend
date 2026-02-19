@@ -30,15 +30,58 @@ AVATAR_MAX_SIZE = 5 * 1024 * 1024  # 5MB
 TASK_IMAGE_MAX_SIZE = 10 * 1024 * 1024  # 10MB
 CHAT_IMAGE_MAX_SIZE = 10 * 1024 * 1024  # 10MB
 
+# Magic bytes for image format detection
+# Maps magic byte signatures to (extension_set, mime_type)
+IMAGE_SIGNATURES = [
+    (b'\x89PNG\r\n\x1a\n', {'png'}, 'image/png'),
+    (b'\xff\xd8\xff', {'jpg', 'jpeg'}, 'image/jpeg'),
+    (b'GIF87a', {'gif'}, 'image/gif'),
+    (b'GIF89a', {'gif'}, 'image/gif'),
+    (b'RIFF', {'webp'}, 'image/webp'),  # WebP starts with RIFF....WEBP
+]
+
+# HEIC uses ftyp box — check bytes 4-12 for 'ftyp' marker
+HEIC_FTYP_BRANDS = {b'heic', b'heix', b'mif1'}
+
+
+def detect_image_type(file_data: bytes):
+    """Detect image type from magic bytes.
+    
+    Returns:
+        Tuple of (extension_set, mime_type) or (None, None) if unknown.
+    """
+    if len(file_data) < 12:
+        return None, None
+    
+    for signature, exts, mime in IMAGE_SIGNATURES:
+        if file_data[:len(signature)] == signature:
+            # Extra check for WebP: bytes 8-12 must be 'WEBP'
+            if 'webp' in exts:
+                if file_data[8:12] != b'WEBP':
+                    continue
+            return exts, mime
+    
+    # HEIC/HEIF: bytes 4-8 should be 'ftyp', bytes 8-12 is the brand
+    if file_data[4:8] == b'ftyp' and file_data[8:12].strip(b'\x00') in HEIC_FTYP_BRANDS:
+        return {'heic'}, 'image/heic'
+    
+    return None, None
+
 
 def allowed_image(filename):
-    """Check if file is an allowed image type."""
+    """Check if file has an allowed image extension."""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in IMAGE_EXTENSIONS
 
 
 def get_file_from_request(max_size: int):
     """Extract and validate file from request.
+    
+    Validates:
+    1. File extension against whitelist
+    2. File size against max_size
+    3. Magic bytes match an actual image format
+    4. Extension matches the detected image type
     
     Returns:
         Tuple of (file_data, filename, content_type, error_response)
@@ -68,7 +111,23 @@ def get_file_from_request(max_size: int):
             'error': f'File too large. Maximum size: {max_mb}MB'
         }), 400)
     
-    return file_data, file.filename, file.content_type, None
+    # Validate magic bytes — don't trust the client's content_type
+    detected_exts, detected_mime = detect_image_type(file_data)
+    
+    if detected_exts is None:
+        return None, None, None, (jsonify({
+            'error': 'File does not appear to be a valid image'
+        }), 400)
+    
+    # Verify the file extension matches the actual content
+    file_ext = file.filename.rsplit('.', 1)[1].lower()
+    if file_ext not in detected_exts:
+        return None, None, None, (jsonify({
+            'error': f'File extension .{file_ext} does not match actual image format'
+        }), 400)
+    
+    # Use the detected MIME type, not the client-provided one
+    return file_data, file.filename, detected_mime, None
 
 
 @uploads_bp.route('/status', methods=['GET'])
