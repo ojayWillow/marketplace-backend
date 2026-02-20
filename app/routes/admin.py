@@ -93,8 +93,8 @@ def get_stats(current_user_id):
             'total_disputes': total_disputes,
             'open_disputes': open_disputes,
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 # ============================================================================
@@ -181,8 +181,8 @@ def list_users_admin(current_user_id):
             'per_page': per_page,
             'totalPages': (total + per_page - 1) // per_page,
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @admin_bp.route('/users/<int:user_id>/ban', methods=['POST'])
@@ -198,9 +198,9 @@ def ban_user(current_user_id, user_id):
         db.session.commit()
         
         return jsonify({'message': f'User {user.username} banned', 'user_id': user_id}), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @admin_bp.route('/users/<int:user_id>/unban', methods=['POST'])
@@ -216,9 +216,9 @@ def unban_user(current_user_id, user_id):
         db.session.commit()
         
         return jsonify({'message': f'User {user.username} unbanned', 'user_id': user_id}), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @admin_bp.route('/users/<int:user_id>/verify', methods=['POST'])
@@ -234,9 +234,9 @@ def verify_user(current_user_id, user_id):
         db.session.commit()
         
         return jsonify({'message': f'User {user.username} verified', 'user_id': user_id}), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ============================================================================
@@ -323,8 +323,8 @@ def list_jobs_admin(current_user_id):
             'per_page': per_page,
             'totalPages': (total + per_page - 1) // per_page,
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @admin_bp.route('/jobs/<int:job_id>', methods=['DELETE'])
@@ -343,9 +343,9 @@ def delete_job_admin(current_user_id, job_id):
         db.session.commit()
         
         return jsonify({'message': 'Job deleted successfully', 'job_id': job_id}), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ============================================================================
@@ -423,8 +423,8 @@ def list_offerings_admin(current_user_id):
             'per_page': per_page,
             'totalPages': (total + per_page - 1) // per_page,
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @admin_bp.route('/offerings/<int:offering_id>', methods=['DELETE'])
@@ -440,9 +440,9 @@ def delete_offering_admin(current_user_id, offering_id):
         db.session.commit()
         
         return jsonify({'message': 'Offering deleted successfully', 'offering_id': offering_id}), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ============================================================================
@@ -562,8 +562,8 @@ def get_analytics(current_user_id):
             'completionData': completion_data,
             'topLocations': top_locations,
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 # ============================================================================
@@ -608,8 +608,8 @@ def list_all_disputes(current_user_id):
             'per_page': per_page,
             'totalPages': (total + per_page - 1) // per_page,
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @admin_bp.route('/disputes/<int:dispute_id>/resolve', methods=['PUT'])
@@ -676,9 +676,9 @@ def admin_resolve_dispute(current_user_id, dispute_id):
             'message': 'Dispute resolved successfully',
             'dispute': dispute.to_dict()
         }), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 # ============================================================================
@@ -693,8 +693,8 @@ def init_database():
     try:
         db.create_all()
         return jsonify({'status': 'success', 'message': 'Database tables created successfully!'}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': 'Database initialization failed'}), 500
+    except Exception:
+        raise
 
 
 @admin_bp.route('/migrate-db', methods=['GET', 'POST'])
@@ -713,9 +713,16 @@ def migrate_database():
         
         for table, column, col_type, default in column_migrations:
             try:
-                check_sql = f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' AND column_name = '{column}'"
-                result = db.session.execute(db.text(check_sql)).fetchone()
+                # Use parameterized query to prevent SQL injection
+                check_sql = db.text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = :table AND column_name = :column"
+                )
+                result = db.session.execute(check_sql, {'table': table, 'column': column}).fetchone()
                 if result is None:
+                    # Column type and default come from hardcoded list above,
+                    # not from user input, so string formatting is safe here.
+                    # Table/column names cannot be parameterized in DDL.
                     alter_sql = f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
                     if default is not None:
                         alter_sql += f" DEFAULT {default}"
@@ -724,13 +731,13 @@ def migrate_database():
                     results.append(f"Added {table}.{column}")
                 else:
                     results.append(f"Column {table}.{column} already exists")
-            except Exception as e:
+            except Exception:
                 results.append(f"Error with {table}.{column}")
                 db.session.rollback()
         
         return jsonify({'status': 'success', 'message': 'Migration completed!', 'details': results}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': 'Migration failed', 'details': results}), 500
+    except Exception:
+        raise
 
 
 @admin_bp.route('/db-status', methods=['GET'])
@@ -739,5 +746,5 @@ def database_status():
     try:
         db.session.execute(db.text('SELECT 1'))
         return jsonify({'status': 'ok', 'database': 'connected'}), 200
-    except Exception as e:
+    except Exception:
         return jsonify({'status': 'error', 'database': 'disconnected'}), 500
