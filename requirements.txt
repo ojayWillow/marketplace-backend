@@ -23,3 +23,4 @@ resend==0.8.0
 vonage>=4.0.0
 vonage-sms>=1.1.0
 supabase>=2.0.0
+redis>=5.0.0
