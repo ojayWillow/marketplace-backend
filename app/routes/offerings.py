@@ -176,8 +176,8 @@ def get_offerings():
                 'page': page
             }), 200
             
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @offerings_bp.route('/my', methods=['GET'])
@@ -197,8 +197,8 @@ def get_my_offerings():
             'page': 1
         }), 200
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @offerings_bp.route('/user/<int:user_id>', methods=['GET'])
@@ -226,8 +226,8 @@ def get_user_offerings(user_id):
             'page': 1
         }), 200
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>', methods=['GET'])
@@ -245,8 +245,8 @@ def get_offering(offering_id):
         offering_dict = translate_offering_if_needed(offering.to_dict(), lang)
         return jsonify(offering_dict), 200
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @offerings_bp.route('', methods=['POST'])
@@ -301,9 +301,9 @@ def create_offering():
             'offering': offering.to_dict()
         }), 201
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>', methods=['PUT'])
@@ -354,9 +354,9 @@ def update_offering(offering_id):
             'offering': offering.to_dict()
         }), 200
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>', methods=['DELETE'])
@@ -378,9 +378,9 @@ def delete_offering(offering_id):
         
         return jsonify({'message': 'Offering deleted successfully'}), 200
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>/pause', methods=['POST'])
@@ -405,9 +405,9 @@ def pause_offering(offering_id):
             'offering': offering.to_dict()
         }), 200
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>/activate', methods=['POST'])
@@ -432,9 +432,9 @@ def activate_offering(offering_id):
             'offering': offering.to_dict()
         }), 200
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>/boost', methods=['POST'])
@@ -473,9 +473,9 @@ def boost_offering(offering_id):
             'boost_expires_at': offering.boost_expires_at.isoformat()
         }), 200
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @offerings_bp.route('/<int:offering_id>/contact', methods=['POST'])
@@ -531,6 +531,6 @@ def contact_offering_creator(offering_id):
             'conversation_id': conversation.id
         }), 201
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise

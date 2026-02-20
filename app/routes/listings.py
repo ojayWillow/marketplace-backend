@@ -36,8 +36,8 @@ def get_listings():
         listings = query.paginate(page=page, per_page=per_page)
         
         return jsonify([listing.to_dict() for listing in listings.items]), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @listings_bp.route('/my', methods=['GET'])
@@ -64,8 +64,8 @@ def get_my_listings(current_user_id):
             'pages': listings.pages,
             'current_page': page
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @listings_bp.route('/user/<int:user_id>', methods=['GET'])
@@ -92,8 +92,8 @@ def get_user_listings(user_id):
             'pages': listings.pages,
             'current_page': page
         }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @listings_bp.route('/<int:listing_id>', methods=['GET'])
@@ -108,8 +108,8 @@ def get_listing(listing_id):
         db.session.commit()
         
         return jsonify(listing.to_dict(include_seller_details=True)), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
 
 
 @listings_bp.route('', methods=['POST'])
@@ -145,9 +145,9 @@ def create_listing(current_user_id):
             'message': 'Listing created successfully',
             'listing': listing.to_dict()
         }), 201
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @listings_bp.route('/<int:listing_id>', methods=['PUT'])
@@ -180,9 +180,9 @@ def update_listing(current_user_id, listing_id):
             'message': 'Listing updated successfully',
             'listing': listing.to_dict()
         }), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @listings_bp.route('/<int:listing_id>', methods=['DELETE'])
@@ -201,6 +201,6 @@ def delete_listing(current_user_id, listing_id):
         db.session.commit()
         
         return jsonify({'message': 'Listing deleted successfully'}), 200
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
