@@ -275,6 +275,9 @@ def create_offering():
             if error_response:
                 return error_response
         
+        # Accept both 'image_urls' (frontend key) and 'images' (model key)
+        images = data.get('image_urls') or data.get('images')
+        
         offering = Offering(
             title=data['title'],
             description=data['description'],
@@ -290,7 +293,7 @@ def create_offering():
             availability=data.get('availability'),
             experience=data.get('experience'),
             service_radius=data.get('service_radius', 25.0),
-            images=data.get('images')
+            images=images
         )
         
         db.session.add(offering)
@@ -335,6 +338,10 @@ def update_offering(offering_id):
             if cat_error:
                 return jsonify({'error': cat_error}), 400
             data['category'] = category
+        
+        # Normalize image_urls → images so the field loop picks it up
+        if 'image_urls' in data and 'images' not in data:
+            data['images'] = data['image_urls']
         
         # Update fields if provided
         updateable_fields = [
