@@ -85,9 +85,9 @@ def complete_onboarding(current_user_id):
             'user': user.to_dict()
         }), 200
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        raise
 
 
 @onboarding_bp.route('/onboarding-status', methods=['GET'])
@@ -137,5 +137,5 @@ def onboarding_status(current_user_id):
             }
         }), 200
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        raise
