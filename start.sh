@@ -49,12 +49,14 @@ echo "[MIGRATION] Completed"
 
 # Start gunicorn with gevent worker for async support
 # Flask-SocketIO with async_mode='gevent' handles Socket.IO connections internally
-# Using 3 workers for better throughput. Redis message queue (REDIS_URL) is required
-# for Socket.IO to work correctly across multiple workers.
-echo "Starting gunicorn on port $PORT with 3 workers..."
+# NOTE: Using 1 worker because Socket.IO polling transport requires sticky sessions.
+# Railway's load balancer doesn't support sticky sessions, so multiple workers
+# cause 400 errors when poll requests land on a different worker than the handshake.
+# Redis message queue is still configured for future multi-worker support.
+echo "Starting gunicorn on port $PORT..."
 exec gunicorn patched_app:application \
     --worker-class gevent \
-    -w 3 \
+    -w 1 \
     --bind 0.0.0.0:$PORT \
     --timeout 120 \
     --log-level info
