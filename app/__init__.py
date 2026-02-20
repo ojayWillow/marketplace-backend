@@ -115,6 +115,18 @@ def create_app(config_name=None):
     # - Testing: 'threading' (gevent not installed in test env)
     socket_async_mode = 'threading' if config_name == 'testing' else 'gevent'
     
+    # Redis message queue for Socket.IO (required for multi-worker Gunicorn)
+    # When running multiple Gunicorn workers, each worker is a separate process.
+    # Redis acts as a pub/sub broker so Socket.IO events (messages, typing, etc.)
+    # are delivered to clients regardless of which worker they're connected to.
+    # If REDIS_URL is not set (e.g. local dev), Socket.IO runs without a queue
+    # (single-process mode — fine for development with 1 worker).
+    redis_url = os.environ.get('REDIS_URL')
+    if redis_url:
+        print(f'[STARTUP] Socket.IO message queue: Redis configured')
+    else:
+        print('[STARTUP] Socket.IO message queue: None (single-worker mode)')
+    
     # Initialize Socket.IO
     # IMPORTANT: Using polling transport ONLY because gunicorn's standard gevent worker
     # does not support WebSocket protocol. WebSocket would require geventwebsocket worker.
@@ -122,6 +134,8 @@ def create_app(config_name=None):
     socketio.init_app(app, 
                      cors_allowed_origins=socket_cors_origins,
                      async_mode=socket_async_mode,
+                     message_queue=redis_url,
+                     channel='kolab-socketio',
                      logger=not app.config.get('TESTING', False),
                      engineio_logger=False,
                      ping_timeout=60,
