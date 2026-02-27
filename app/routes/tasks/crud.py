@@ -536,6 +536,9 @@ def update_task(current_user_id, task_id):
                 return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
             task.difficulty = data['difficulty']
         
+        if 'images' in data:
+            task.images = data['images']
+        
         task.updated_at = datetime.utcnow()
         db.session.commit()
         
