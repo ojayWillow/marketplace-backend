@@ -153,8 +153,25 @@ except Exception as e:
     print(f'[HOTFIX] Warning: {e}')
 " 2>&1 || echo "[HOTFIX] Warning: job_alert_preferences hotfix failed"
 
-# Stamp Alembic version if DB was created via db.create_all() (no migration history)
-# This prevents Alembic from trying to replay all migrations on an already-populated DB
+# Hotfix: add onboarding columns to users table
+echo "[HOTFIX] Ensuring onboarding columns exist on users table..."
+python -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT false')
+    cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes_remaining INTEGER NOT NULL DEFAULT 1')
+    # Mark existing real users as onboarding completed so they are not locked out
+    cur.execute(\"UPDATE users SET onboarding_completed = true WHERE username IS NOT NULL AND username NOT LIKE 'user_%' AND onboarding_completed = false\")
+    print('[HOTFIX] onboarding columns ready')
+    conn.close()
+except Exception as e:
+    print(f'[HOTFIX] Warning: {e}')
+" 2>&1 || echo "[HOTFIX] Warning: onboarding hotfix failed"
+
+# Stamp Alembic version to latest head so future migrations chain correctly
 echo "[ALEMBIC] Checking migration state..."
 python -c "
 import os, psycopg2
@@ -170,19 +187,22 @@ try:
         cur.execute('SELECT COUNT(*) FROM alembic_version')
         count = cur.fetchone()[0]
         if count == 0:
-            print('[ALEMBIC] alembic_version is empty - DB was created via db.create_all()')  
-            print('[ALEMBIC] Stamping current head: merge_all_heads_feb2026')
-            cur.execute(\"INSERT INTO alembic_version (version_num) VALUES ('merge_all_heads_feb2026')\")
-            print('[ALEMBIC] Stamped successfully - migrations are now in sync')
+            print('[ALEMBIC] alembic_version is empty - stamping to latest head')
+            cur.execute(\"INSERT INTO alembic_version (version_num) VALUES ('add_onboarding_fields')\")
+            print('[ALEMBIC] Stamped successfully')
         else:
             cur.execute('SELECT version_num FROM alembic_version')
             version = cur.fetchone()[0]
             print(f'[ALEMBIC] Current version: {version}')
+            # Update stamp to latest head if behind
+            if version != 'add_onboarding_fields':
+                cur.execute(\"UPDATE alembic_version SET version_num = 'add_onboarding_fields'\")
+                print(f'[ALEMBIC] Updated stamp from {version} to add_onboarding_fields')
     else:
         print('[ALEMBIC] No alembic_version table - creating and stamping...')
         cur.execute('CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))')
-        cur.execute(\"INSERT INTO alembic_version (version_num) VALUES ('merge_all_heads_feb2026')\")
-        print('[ALEMBIC] Created and stamped to merge_all_heads_feb2026')
+        cur.execute(\"INSERT INTO alembic_version (version_num) VALUES ('add_onboarding_fields')\")
+        print('[ALEMBIC] Created and stamped to add_onboarding_fields')
     
     conn.close()
 except Exception as e:
