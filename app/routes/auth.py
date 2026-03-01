@@ -4,7 +4,6 @@ from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
 from app.services.email import email_service
-from app.services.vonage_sms import send_verification_code, verify_code, normalize_phone_number
 from app.utils import token_required
 from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
@@ -111,217 +110,20 @@ def login():
 
 
 # ============================================================================
-# VONAGE PHONE AUTHENTICATION ENDPOINTS
-# ============================================================================
-
-@auth_bp.route('/phone/send-otp', methods=['POST'])
-def phone_send_otp():
-    """Send OTP verification code to phone number via Vonage."""
-    try:
-        data = request.get_json()
-        
-        if not data or 'phoneNumber' not in data:
-            return jsonify({'error': 'Phone number is required'}), 400
-        
-        phone_number = data['phoneNumber']
-        
-        normalized = normalize_phone_number(phone_number)
-        if not normalized or len(normalized) < 10:
-            return jsonify({'error': 'Invalid phone number format'}), 400
-        
-        result = send_verification_code(phone_number)
-        
-        if result['success']:
-            return jsonify({
-                'success': True,
-                'message': 'Verification code sent',
-                'phone': result['phone']
-            }), 200
-        else:
-            return jsonify({
-                'success': False,
-                'error': result['error']
-            }), 400
-            
-    except ValueError as e:
-        current_app.logger.error(f"Vonage configuration error: {e}")
-        return jsonify({'error': 'SMS service not configured'}), 500
-    except Exception as e:
-        current_app.logger.error(f"Send OTP error: {str(e)}")
-        current_app.logger.debug(traceback.format_exc())
-        return jsonify({'error': 'Failed to send verification code'}), 500
-
-
-@auth_bp.route('/phone/verify-otp', methods=['POST'])
-def phone_verify_otp():
-    """Verify OTP code and create/login user."""
-    try:
-        data = request.get_json()
-        
-        if not data or 'phoneNumber' not in data or 'code' not in data:
-            return jsonify({'error': 'Phone number and verification code are required'}), 400
-        
-        phone_number = data['phoneNumber']
-        code = data['code']
-        
-        result = verify_code(phone_number, code)
-        
-        if not result['success']:
-            return jsonify({
-                'success': False,
-                'error': result['error']
-            }), 400
-        
-        normalized_phone = result['phone']
-        
-        user = User.query.filter_by(phone=normalized_phone).first()
-        is_new_user = False
-        
-        if user:
-            if not user.is_active:
-                return jsonify({'error': 'Account is disabled'}), 403
-            
-            user.phone_verified = True
-            user.last_seen = datetime.utcnow()
-            db.session.commit()
-            
-            current_app.logger.info(f"Phone login: existing user {user.id}")
-        else:
-            is_new_user = True
-            temp_username = generate_temp_username()
-            temp_email = f"{temp_username}@phone.kolab.local"
-            
-            user = User(
-                username=temp_username,
-                email=temp_email,
-                phone=normalized_phone,
-                phone_verified=True,
-                is_verified=True
-            )
-            user.set_password(generate_temp_password())
-            
-            db.session.add(user)
-            db.session.commit()
-            
-            current_app.logger.info(f"Phone login: new user created {user.id}")
-        
-        payload = {
-            'user_id': user.id,
-            'username': user.username,
-            'exp': datetime.utcnow() + timedelta(hours=24)
-        }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
-        
-        return jsonify({
-            'success': True,
-            'message': 'Phone verification successful',
-            'access_token': token,
-            'user': user.to_dict(),
-            'is_new_user': is_new_user
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Verify OTP error: {str(e)}")
-        current_app.logger.debug(traceback.format_exc())
-        return jsonify({'error': 'Phone verification failed'}), 500
-
-
-@auth_bp.route('/phone/link-otp', methods=['POST'])
-@token_required
-def phone_link_otp(current_user_id):
-    """Link a verified phone number to existing user account."""
-    try:
-        user = User.query.get(current_user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        if not user.is_active:
-            return jsonify({'error': 'Account is disabled'}), 403
-        
-        data = request.get_json()
-        
-        if not data or 'phoneNumber' not in data or 'code' not in data:
-            return jsonify({'error': 'Phone number and verification code are required'}), 400
-        
-        phone_number = data['phoneNumber']
-        code = data['code']
-        
-        result = verify_code(phone_number, code)
-        
-        if not result['success']:
-            return jsonify({
-                'success': False,
-                'error': result['error']
-            }), 400
-        
-        normalized_phone = result['phone']
-        
-        existing_user = User.query.filter_by(phone=normalized_phone).first()
-        if existing_user and existing_user.id != user.id:
-            return jsonify({
-                'error': 'This phone number is already linked to another account'
-            }), 409
-        
-        user.phone = normalized_phone
-        user.phone_verified = True
-        user.is_verified = True
-        user.updated_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        current_app.logger.info(f"Phone linked to user {user.id}: {normalized_phone}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Phone number verified and linked successfully',
-            'user': user.to_dict()
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Phone link error: {str(e)}")
-        current_app.logger.debug(traceback.format_exc())
-        return jsonify({'error': 'Failed to link phone number'}), 500
-
-
-@auth_bp.route('/phone/check/<phone>', methods=['GET'])
-def phone_check(phone):
-    """Check if a phone number is already registered."""
-    try:
-        normalized_phone = normalize_phone_number(phone)
-        
-        if not normalized_phone:
-            return jsonify({'error': 'Invalid phone number'}), 400
-        
-        user = User.query.filter_by(phone=normalized_phone).first()
-        
-        return jsonify({
-            'exists': user is not None,
-            'phone': normalized_phone
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Phone check error: {str(e)}")
-        return jsonify({'error': 'Failed to check phone number'}), 500
-
-
-# ============================================================================
-# LEGACY FIREBASE ENDPOINTS (kept for backward compatibility)
+# FIREBASE PHONE AUTHENTICATION ENDPOINTS
 # ============================================================================
 
 @auth_bp.route('/phone/verify', methods=['POST'])
 def phone_verify():
-    """Legacy Firebase phone verification endpoint.
+    """Firebase phone verification endpoint.
     
-    DEPRECATED: Use /phone/send-otp and /phone/verify-otp instead.
+    Verifies a Firebase ID token and creates/logs in the user.
     """
     try:
         try:
             from app.services.firebase import verify_firebase_token, normalize_phone_number as firebase_normalize
         except ImportError:
-            return jsonify({'error': 'Firebase authentication is not available. Use /phone/send-otp instead.'}), 501
+            return jsonify({'error': 'Firebase authentication is not available.'}), 501
         
         data = request.get_json()
         
@@ -407,15 +209,12 @@ def phone_verify():
 @auth_bp.route('/phone/link', methods=['POST'])
 @token_required
 def phone_link(current_user_id):
-    """Legacy Firebase phone link endpoint.
-    
-    DEPRECATED: Use /phone/send-otp and /phone/link-otp instead.
-    """
+    """Link a verified phone number to existing user account via Firebase."""
     try:
         try:
             from app.services.firebase import verify_firebase_token, normalize_phone_number as firebase_normalize
         except ImportError:
-            return jsonify({'error': 'Firebase authentication is not available. Use /phone/link-otp instead.'}), 501
+            return jsonify({'error': 'Firebase authentication is not available.'}), 501
         
         user = User.query.get(current_user_id)
         
@@ -633,7 +432,7 @@ def check_username(username):
 
 
 # ============================================================================
-# PROFILE & USER ENDPOINTS
+# PASSWORD MANAGEMENT
 # ============================================================================
 
 @auth_bp.route('/forgot-password', methods=['POST'])
@@ -718,6 +517,10 @@ def reset_password():
         current_app.logger.error(f"Reset password error: {str(e)}")
         return jsonify({'error': 'Failed to reset password'}), 500
 
+
+# ============================================================================
+# PROFILE & USER ENDPOINTS
+# ============================================================================
 
 @auth_bp.route('/profile', methods=['GET'])
 @token_required
