@@ -189,7 +189,7 @@ def phone_verify_otp():
         else:
             is_new_user = True
             temp_username = generate_temp_username()
-            temp_email = f"{temp_username}@phone.tirgus.local"
+            temp_email = f"{temp_username}@phone.kolab.local"
             
             user = User(
                 username=temp_username,
@@ -367,7 +367,7 @@ def phone_verify():
         else:
             is_new_user = True
             temp_username = generate_temp_username()
-            temp_email = f"{temp_username}@phone.tirgus.local"
+            temp_email = f"{temp_username}@phone.kolab.local"
             
             user = User(
                 username=temp_username,
@@ -475,20 +475,37 @@ def phone_link(current_user_id):
 @auth_bp.route('/complete-registration', methods=['PUT'])
 @token_required
 def complete_registration(current_user_id):
-    """Complete registration for phone-authenticated users."""
+    """Complete onboarding for new users.
+    
+    This is the single onboarding endpoint that every new user goes through
+    exactly once after phone verification. Collects all required profile
+    information in one call.
+    
+    Required fields: username, first_name, last_name
+    Optional fields: email, country, city, skills, bio, job_alert_preferences
+    """
     try:
         user = User.query.get(current_user_id)
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
+        # Prevent completing onboarding twice
+        if user.onboarding_completed:
+            return jsonify({'error': 'Onboarding already completed'}), 400
+        
         data = request.get_json()
         
-        if not data or 'username' not in data:
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # ── Required fields ─────────────────────────────────────────────
+        
+        # Username (required)
+        if 'username' not in data or not data['username']:
             return jsonify({'error': 'Username is required'}), 400
         
         new_username = data['username'].lower().strip()
-        new_email = data.get('email', '').lower().strip() if data.get('email') else None
         
         if len(new_username) < 3:
             return jsonify({'error': 'Username must be at least 3 characters'}), 400
@@ -503,6 +520,22 @@ def complete_registration(current_user_id):
         if existing_user and existing_user.id != user.id:
             return jsonify({'error': 'Username already exists'}), 409
         
+        # First name (required)
+        if 'first_name' not in data or not data.get('first_name', '').strip():
+            return jsonify({'error': 'First name is required'}), 400
+        
+        # Last name (required)
+        if 'last_name' not in data or not data.get('last_name', '').strip():
+            return jsonify({'error': 'Last name is required'}), 400
+        
+        # ── Set all fields ──────────────────────────────────────────────
+        
+        user.username = new_username
+        user.first_name = data['first_name'].strip()
+        user.last_name = data['last_name'].strip()
+        
+        # Email (optional — replace placeholder if provided)
+        new_email = data.get('email', '').lower().strip() if data.get('email') else None
         if new_email:
             if '@' not in new_email or '.' not in new_email:
                 return jsonify({'error': 'Invalid email format'}), 400
@@ -513,11 +546,42 @@ def complete_registration(current_user_id):
             
             user.email = new_email
         
-        user.username = new_username
+        # Country (optional)
+        if 'country' in data:
+            user.country = data['country'].strip() if data['country'] else None
+        
+        # City (optional)
+        if 'city' in data:
+            user.city = data['city'].strip() if data['city'] else None
+        
+        # Skills (optional — sets is_helper automatically)
+        if 'skills' in data:
+            if isinstance(data['skills'], list):
+                user.skills = ','.join(data['skills'])
+            else:
+                user.skills = data['skills']
+            # Auto-set helper status if skills provided
+            if user.skills:
+                user.is_helper = True
+        
+        # Bio (optional, max 500 chars)
+        if 'bio' in data:
+            bio_text = data['bio'].strip() if data['bio'] else None
+            user.bio = bio_text[:500] if bio_text else None
+        
+        # Job alert preferences (optional)
+        if 'job_alert_preferences' in data and isinstance(data['job_alert_preferences'], dict):
+            user.set_job_alert_prefs(data['job_alert_preferences'])
+        
+        # ── Mark onboarding as completed ────────────────────────────────
+        
+        user.onboarding_completed = True
+        user.username_changes_remaining = 1  # One free username change allowed
         user.updated_at = datetime.utcnow()
         
         db.session.commit()
         
+        # Issue new JWT with updated username
         payload = {
             'user_id': user.id,
             'username': user.username,
@@ -534,7 +598,38 @@ def complete_registration(current_user_id):
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Complete registration error: {str(e)}")
+        current_app.logger.debug(traceback.format_exc())
         return jsonify({'error': 'Failed to complete registration'}), 500
+
+
+@auth_bp.route('/check-username/<username>', methods=['GET'])
+def check_username(username):
+    """Check if a username is available.
+    
+    Used by the frontend onboarding wizard for live availability checks.
+    """
+    try:
+        clean = username.lower().strip()
+        
+        if len(clean) < 3:
+            return jsonify({'available': False, 'reason': 'Too short'}), 200
+        
+        if len(clean) > 30:
+            return jsonify({'available': False, 'reason': 'Too long'}), 200
+        
+        if not clean.replace('_', '').isalnum():
+            return jsonify({'available': False, 'reason': 'Invalid characters'}), 200
+        
+        existing = User.query.filter_by(username=clean).first()
+        
+        return jsonify({
+            'available': existing is None,
+            'username': clean
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Check username error: {str(e)}")
+        return jsonify({'error': 'Failed to check username'}), 500
 
 
 # ============================================================================
@@ -776,6 +871,27 @@ def update_profile(current_user_id):
             return jsonify({'error': 'User not found'}), 404
         
         data = request.get_json()
+        
+        # Username change guard — only allowed if changes remaining > 0
+        if 'username' in data:
+            new_username = data['username'].lower().strip()
+            if new_username != user.username:
+                if user.username_changes_remaining <= 0:
+                    return jsonify({'error': 'Username change limit reached. You cannot change your username again.'}), 403
+                
+                if len(new_username) < 3:
+                    return jsonify({'error': 'Username must be at least 3 characters'}), 400
+                if len(new_username) > 30:
+                    return jsonify({'error': 'Username must be less than 30 characters'}), 400
+                if not new_username.replace('_', '').isalnum():
+                    return jsonify({'error': 'Username can only contain letters, numbers, and underscores'}), 400
+                
+                existing_user = User.query.filter_by(username=new_username).first()
+                if existing_user and existing_user.id != user.id:
+                    return jsonify({'error': 'Username already exists'}), 409
+                
+                user.username = new_username
+                user.username_changes_remaining -= 1
         
         if 'first_name' in data:
             user.first_name = data['first_name']

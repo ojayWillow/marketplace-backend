@@ -42,6 +42,10 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)  # Track user activity
     
+    # Onboarding tracking
+    onboarding_completed = db.Column(db.Boolean, default=False, nullable=False)
+    username_changes_remaining = db.Column(db.Integer, default=1, nullable=False)
+    
     # Presence tracking fields
     is_online = db.Column(db.Boolean, default=False, nullable=False)
     socket_id = db.Column(db.String(100), nullable=True)
@@ -244,6 +248,8 @@ class User(db.Model):
             'longitude': self.longitude,
             'rating': self.rating,
             'review_count': self.review_count,
+            'onboarding_completed': self.onboarding_completed,
+            'username_changes_remaining': self.username_changes_remaining,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
@@ -274,6 +280,7 @@ class User(db.Model):
             'hourly_rate': self.hourly_rate,
             'rating': self.rating,
             'review_count': self.review_count,
+            'onboarding_completed': self.onboarding_completed,
             'created_at': self.created_at.isoformat(),
             'is_online': self.is_online,
             'online_status': self.get_online_status(),
