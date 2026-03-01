@@ -6,6 +6,20 @@ echo "Starting application..."
 # Set default PORT if not set
 export PORT=${PORT:-10000}
 
+# One-time DB reset (set RESET_DB=true in Railway env vars, then remove it after deploy)
+if [ "$RESET_DB" = "true" ]; then
+    echo "[RESET] Dropping and recreating all database tables..."
+    python -c "
+from app import create_app, db
+app = create_app()
+with app.app_context():
+    db.drop_all()
+    db.create_all()
+    print('[RESET] Database reset complete!')
+"
+    echo "[RESET] Done. REMOVE the RESET_DB env var now to prevent re-reset on next deploy."
+fi
+
 # Hotfix: add difficulty column if it doesn't exist (Alembic migration was silently failing)
 echo "[HOTFIX] Ensuring difficulty column exists..."
 python -c "
