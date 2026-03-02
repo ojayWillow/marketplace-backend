@@ -2,12 +2,9 @@
 
 from flask import Blueprint, request, jsonify, current_app
 from app import db
-from app.models import User, Review, PasswordResetToken, Listing, Offering, TaskRequest, TaskApplication
-from app.services.email import email_service
+from app.models import User, Review, Listing, Offering, TaskRequest, TaskApplication
 from app.utils import token_required
-from app.utils.auth import SECRET_KEY  # Single source of truth for JWT secret
 from datetime import datetime, timedelta
-import jwt
 import traceback
 import secrets
 import string
@@ -96,22 +93,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
             f'Failed to create Supabase user for local user {user.id}: {e}'
         )
         current_app.logger.debug(traceback.format_exc())
-        # Don't fail the request — legacy JWT still works
         return None, None
-
-
-def _generate_legacy_jwt(user):
-    """Generate a legacy custom JWT for backward compatibility.
-
-    Only used as a fallback when Supabase session generation fails.
-    Will be removed once all clients use Supabase sessions.
-    """
-    payload = {
-        'user_id': user.id,
-        'username': user.username,
-        'exp': datetime.utcnow() + timedelta(hours=24)
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm='HS256')
 
 
 def _get_supabase_session(user, phone=None, email=None, password=None):
@@ -141,10 +123,9 @@ def _get_supabase_session(user, phone=None, email=None, password=None):
 
 
 def _build_session_response(user, message, supabase_session=None, **extra):
-    """Build a standardized auth response with session tokens.
+    """Build a standardized auth response with Supabase session tokens.
 
-    If supabase_session is available, uses Supabase tokens.
-    Otherwise falls back to legacy JWT with a warning.
+    Requires a valid Supabase session. Returns 500 if session generation failed.
     """
     response_data = {
         'message': message,
@@ -159,96 +140,12 @@ def _build_session_response(user, message, supabase_session=None, **extra):
         response_data['expires_at'] = supabase_session['expires_at']
         response_data['token_type'] = 'supabase'
     else:
-        # Fallback to legacy JWT — log warning
-        current_app.logger.warning(
-            f'Falling back to legacy JWT for user {user.id} — '
-            'Supabase session generation failed'
+        current_app.logger.error(
+            f'Supabase session generation failed for user {user.id}'
         )
-        response_data['access_token'] = _generate_legacy_jwt(user)
-        response_data['token_type'] = 'legacy'
+        return None
 
     return response_data
-
-
-@auth_bp.route('/register', methods=['POST'])
-def register():
-    """Register a new user account."""
-    try:
-        data = request.get_json()
-        
-        if not data or not all(k in data for k in ['username', 'email', 'password']):
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        # Validate password length (consistent with reset-password)
-        if len(data['password']) < 6:
-            return jsonify({'error': 'Password must be at least 6 characters'}), 400
-        
-        if User.query.filter_by(username=data['username']).first():
-            return jsonify({'error': 'Username already exists'}), 409
-        
-        if User.query.filter_by(email=data['email']).first():
-            return jsonify({'error': 'Email already exists'}), 409
-        
-        user = User(
-            username=data['username'],
-            email=data['email'],
-            first_name=data.get('first_name'),
-            last_name=data.get('last_name')
-        )
-        user.set_password(data['password'])
-        
-        db.session.add(user)
-        db.session.commit()
-        
-        # Generate token for auto-login after registration
-        payload = {
-            'user_id': user.id,
-            'username': user.username,
-            'exp': datetime.utcnow() + timedelta(hours=24)
-        }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
-        
-        return jsonify({
-            'message': 'User registered successfully',
-            'token': token,
-            'user': user.to_dict()
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    """Authenticate user and return JWT token."""
-    try:
-        data = request.get_json()
-        
-        if not data or not all(k in data for k in ['email', 'password']):
-            return jsonify({'error': 'Missing email or password'}), 400
-        
-        user = User.query.filter_by(email=data['email']).first()
-        
-        if not user or not user.check_password(data['password']):
-            return jsonify({'error': 'Invalid email or password'}), 401
-        
-        if not user.is_active:
-            return jsonify({'error': 'Account is disabled'}), 403
-        
-        payload = {
-            'user_id': user.id,
-            'username': user.username,
-            'exp': datetime.utcnow() + timedelta(hours=24)
-        }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
-        
-        return jsonify({
-            'message': 'Login successful',
-            'token': token,
-            'user': user.to_dict()
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================================
@@ -262,8 +159,6 @@ def phone_verify():
     Verifies a Firebase ID token and creates/logs in the user.
     Creates a Supabase Auth user and returns a Supabase session
     (access_token + refresh_token) for the frontend to use.
-
-    Falls back to legacy JWT if Supabase session generation fails.
     """
     try:
         try:
@@ -346,6 +241,9 @@ def phone_verify():
             supabase_session, is_new_user=is_new_user
         )
         
+        if response_data is None:
+            return jsonify({'error': 'Authentication failed — could not generate session'}), 500
+        
         return jsonify(response_data), 200
         
     except Exception as e:
@@ -426,6 +324,9 @@ def phone_link(current_user_id):
             user, 'Phone number verified and linked successfully',
             supabase_session
         )
+        
+        if response_data is None:
+            return jsonify({'error': 'Phone linked but session refresh failed'}), 500
         
         return jsonify(response_data), 200
         
@@ -563,6 +464,9 @@ def complete_registration(current_user_id):
             supabase_session
         )
         
+        if response_data is None:
+            return jsonify({'error': 'Registration completed but session generation failed'}), 500
+        
         return jsonify(response_data), 200
         
     except Exception as e:
@@ -600,93 +504,6 @@ def check_username(username):
     except Exception as e:
         current_app.logger.error(f"Check username error: {str(e)}")
         return jsonify({'error': 'Failed to check username'}), 500
-
-
-# ============================================================================
-# PASSWORD MANAGEMENT
-# ============================================================================
-
-@auth_bp.route('/forgot-password', methods=['POST'])
-def forgot_password():
-    """Request a password reset email."""
-    try:
-        data = request.get_json()
-        
-        if not data or 'email' not in data:
-            return jsonify({'error': 'Email is required'}), 400
-        
-        email = data['email'].lower().strip()
-        current_app.logger.debug(f"Password reset requested for email: {email}")
-        
-        user = User.query.filter_by(email=email).first()
-        
-        if user:
-            try:
-                reset_token = PasswordResetToken.generate_token(user.id)
-                current_app.logger.debug(f"Reset token generated for user_id: {user.id}")
-                
-                email_service.send_password_reset_email(
-                    to_email=user.email,
-                    username=user.username,
-                    reset_token=reset_token
-                )
-                current_app.logger.debug(f"Password reset email sent to user_id: {user.id}")
-            except Exception as inner_e:
-                current_app.logger.error(f"Error in password reset process: {str(inner_e)}")
-                current_app.logger.debug(traceback.format_exc())
-        
-        return jsonify({
-            'message': 'If an account with that email exists, we have sent a password reset link.'
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Forgot password error: {str(e)}")
-        return jsonify({'error': 'Failed to process request'}), 500
-
-
-@auth_bp.route('/reset-password', methods=['POST'])
-def reset_password():
-    """Reset password using token from email."""
-    try:
-        data = request.get_json()
-        
-        if not data or not all(k in data for k in ['token', 'password']):
-            return jsonify({'error': 'Token and password are required'}), 400
-        
-        token = data['token']
-        new_password = data['password']
-        
-        if len(new_password) < 6:
-            return jsonify({'error': 'Password must be at least 6 characters'}), 400
-        
-        user_id = PasswordResetToken.verify_token(token)
-        
-        if not user_id:
-            return jsonify({'error': 'Invalid or expired reset link'}), 400
-        
-        user = User.query.get(user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        if not user.is_active:
-            return jsonify({'error': 'Account is disabled'}), 403
-        
-        user.set_password(new_password)
-        user.updated_at = datetime.utcnow()
-        
-        PasswordResetToken.use_token(token)
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Password has been reset successfully'
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Reset password error: {str(e)}")
-        return jsonify({'error': 'Failed to reset password'}), 500
 
 
 # ============================================================================
