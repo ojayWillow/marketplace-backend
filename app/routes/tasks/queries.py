@@ -1,12 +1,31 @@
 """User-specific task query routes (my tasks, created tasks, notifications)."""
 
+from datetime import datetime
 from flask import request, jsonify
+from sqlalchemy import case
 from sqlalchemy.orm import joinedload
 from app import db
 from app.models import TaskRequest, User, TaskApplication
 from app.utils import token_required
 from app.routes.tasks import tasks_bp
 from app.routes.tasks.helpers import translate_task_if_needed
+
+
+def _premium_order_by():
+    """SQLAlchemy order_by clause that sorts premium tasks first.
+    
+    Order: promoted (active) → urgent (active) → regular, then newest.
+    """
+    now = datetime.utcnow()
+    return [
+        case(
+            (db.and_(TaskRequest.is_promoted == True, TaskRequest.promoted_expires_at > now), 0),
+            (db.and_(TaskRequest.is_urgent == True, TaskRequest.urgent_expires_at > now), 1),
+            (db.and_(TaskRequest.is_urgent == True, TaskRequest.urgent_expires_at.is_(None)), 1),
+            else_=2
+        ),
+        TaskRequest.created_at.desc()
+    ]
 
 
 @tasks_bp.route('/notifications', methods=['GET'])
@@ -59,20 +78,13 @@ def get_my_tasks(current_user_id):
     try:
         lang = request.args.get('lang')
         
-        # Include all statuses where the worker is involved:
-        # - assigned: accepted but not started
-        # - accepted: legacy status (same as assigned)
-        # - in_progress: worker is working on it
-        # - pending_confirmation: worker marked done, waiting for creator
-        # - completed: task is done
-        # - disputed: task has an active dispute
         my_tasks = TaskRequest.query.options(
             joinedload(TaskRequest.creator),
             joinedload(TaskRequest.assigned_user)
         ).filter(
             TaskRequest.assigned_to_id == current_user_id,
             TaskRequest.status.in_(['assigned', 'accepted', 'in_progress', 'pending_confirmation', 'completed', 'disputed'])
-        ).order_by(TaskRequest.created_at.desc()).all()
+        ).order_by(*_premium_order_by()).all()
         
         tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in my_tasks]
         
@@ -96,7 +108,7 @@ def get_created_tasks(current_user_id):
             joinedload(TaskRequest.assigned_user)
         ).filter(
             TaskRequest.creator_id == current_user_id
-        ).order_by(TaskRequest.created_at.desc()).all()
+        ).order_by(*_premium_order_by()).all()
         
         results = []
         for task in created_tasks:
@@ -132,7 +144,7 @@ def get_user_tasks(user_id):
         ).filter_by(
             creator_id=user_id,
             status='open'
-        ).order_by(TaskRequest.created_at.desc()).all()
+        ).order_by(*_premium_order_by()).all()
         
         tasks_list = [translate_task_if_needed(task.to_dict(), lang) for task in tasks]
         

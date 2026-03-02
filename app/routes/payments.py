@@ -19,8 +19,13 @@ logger = logging.getLogger(__name__)
 
 payments_bp = Blueprint('payments', __name__)
 
-# Duration for paid features
-FEATURE_DURATION = timedelta(hours=24)
+# Duration per premium feature type
+FEATURE_DURATIONS = {
+    'urgent_task': timedelta(hours=24),
+    'promote_task': timedelta(days=3),
+    'promote_offering': timedelta(days=3),
+    'boost_offering': timedelta(hours=24),
+}
 
 
 @payments_bp.route('/create-order', methods=['POST'])
@@ -30,7 +35,7 @@ def create_order(current_user_id):
     
     Body:
         type: str — 'urgent_task', 'promote_task', 'promote_offering', 'boost_offering'
-        entity_id: int — task_request.id or offering.id
+        entity_id: int — task_request.id or offering.id (also accepts 'target_id')
     
     Returns:
         { checkout_url: str, order_id: str }
@@ -40,7 +45,7 @@ def create_order(current_user_id):
         return jsonify({'error': 'Request body is required'}), 400
     
     payment_type = data.get('type')
-    entity_id = data.get('entity_id')
+    entity_id = data.get('entity_id') or data.get('target_id')
     
     # Validate payment type
     if not Payment.is_valid_type(payment_type):
@@ -226,12 +231,18 @@ def _activate_feature(payment):
     """Activate the paid feature for a payment.
     
     Sets the appropriate flags and expiration on the entity.
+    Uses per-type durations from FEATURE_DURATIONS.
     
     Returns:
         True on success, False on failure
     """
     now = datetime.utcnow()
-    expires_at = now + FEATURE_DURATION
+    duration = FEATURE_DURATIONS.get(payment.type)
+    if not duration:
+        logger.error(f'No duration defined for payment type: {payment.type}')
+        return False
+    
+    expires_at = now + duration
     
     try:
         if payment.type == 'urgent_task':
@@ -271,6 +282,7 @@ def _activate_feature(payment):
             return False
         
         db.session.flush()
+        logger.info(f'Feature {payment.type} activated for entity {payment.entity_id}, expires at {expires_at}')
         return True
         
     except Exception as e:

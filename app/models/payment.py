@@ -39,8 +39,8 @@ class Payment(db.Model):
     # Valid payment types and their prices in cents
     PRICES = {
         'urgent_task': 200,       # €2.00
-        'promote_task': 100,      # €1.00
-        'promote_offering': 100,  # €1.00
+        'promote_task': 500,      # €5.00
+        'promote_offering': 500,  # €5.00
         'boost_offering': 100,    # €1.00
     }
     
