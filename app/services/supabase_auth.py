@@ -9,8 +9,9 @@ Note: These use the SERVICE_KEY (admin access). Never expose to frontend.
 """
 
 import logging
-from typing import Optional
-from app.services.supabase_client import get_supabase_client
+import secrets
+from typing import Optional, Tuple
+from app.services.supabase_client import get_supabase_client, get_supabase_anon_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ def create_supabase_user(
     email_confirm: bool = True,
     phone_confirm: bool = True,
     user_metadata: Optional[dict] = None,
-) -> dict:
+) -> Tuple:
     """Create a new user in Supabase Auth.
 
     Args:
@@ -34,7 +35,8 @@ def create_supabase_user(
         user_metadata: Additional metadata to store
 
     Returns:
-        Supabase user object dict
+        Tuple of (supabase_user, password_used)
+        password_used is needed for subsequent sign_in_with_password
 
     Raises:
         Exception if creation fails
@@ -43,7 +45,6 @@ def create_supabase_user(
     if not client:
         raise RuntimeError('Supabase client not available')
 
-    import secrets
     if not password:
         password = secrets.token_urlsafe(32)
 
@@ -59,7 +60,90 @@ def create_supabase_user(
 
     response = client.auth.admin.create_user(attrs)
     logger.info(f'Supabase user created: {response.user.id}')
-    return response.user
+    return response.user, password
+
+
+def generate_supabase_session(
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    password: Optional[str] = None,
+    supabase_user_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Generate a Supabase session (access_token + refresh_token) for a user.
+
+    Uses sign_in_with_password via the anon client. If no password is known,
+    sets a new random password via admin API first, then signs in.
+
+    Args:
+        email: User email (used for sign-in if available)
+        phone: User phone (used for sign-in if email not available)
+        password: Known password for the user
+        supabase_user_id: Supabase user UUID (needed to reset password if unknown)
+
+    Returns:
+        Dict with access_token, refresh_token, expires_in, expires_at
+        or None if session generation fails
+    """
+    anon_client = get_supabase_anon_client()
+    if not anon_client:
+        logger.warning('Anon client not available — cannot generate Supabase session')
+        return None
+
+    # If no password is known, set a new one via admin API
+    if not password:
+        if not supabase_user_id:
+            logger.error('Cannot generate session: no password and no supabase_user_id')
+            return None
+
+        admin_client = get_supabase_client()
+        if not admin_client:
+            logger.error('Admin client not available for password reset')
+            return None
+
+        password = secrets.token_urlsafe(32)
+        try:
+            admin_client.auth.admin.update_user(
+                supabase_user_id,
+                {'password': password}
+            )
+            logger.debug(f'Reset password for Supabase user {supabase_user_id}')
+        except Exception as e:
+            logger.error(f'Failed to reset password for session generation: {e}')
+            return None
+
+    # Sign in to get a real session
+    try:
+        credentials = {'password': password}
+
+        # Prefer email for sign-in (more reliable), fall back to phone
+        if email and not email.endswith('.kolab.local'):
+            credentials['email'] = email
+        elif phone:
+            credentials['phone'] = phone
+        elif email:
+            # Use placeholder email as last resort
+            credentials['email'] = email
+        else:
+            logger.error('No email or phone available for sign-in')
+            return None
+
+        response = anon_client.auth.sign_in_with_password(credentials)
+
+        if response.session:
+            logger.info('Supabase session generated successfully')
+            return {
+                'access_token': response.session.access_token,
+                'refresh_token': response.session.refresh_token,
+                'expires_in': response.session.expires_in,
+                'expires_at': response.session.expires_at,
+            }
+        else:
+            logger.error('sign_in_with_password returned no session')
+            return None
+
+    except Exception as e:
+        logger.error(f'Failed to generate Supabase session: {e}')
+        return None
 
 
 def get_supabase_user_by_id(user_id: str):
