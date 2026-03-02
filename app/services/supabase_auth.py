@@ -9,8 +9,10 @@ Note: These use the SERVICE_KEY (admin access). Never expose to frontend.
 """
 
 import logging
+import os
 import secrets
 from typing import Optional, Tuple
+import requests as http_requests
 from app.services.supabase_client import get_supabase_client, get_supabase_anon_client
 
 logger = logging.getLogger(__name__)
@@ -166,16 +168,69 @@ def get_supabase_user_by_id(user_id: str):
     return response.user
 
 
+def _gotrue_admin_list_users_filtered(filter_value: str) -> Optional[list]:
+    """Call GoTrue admin API with server-side filter.
+
+    The GoTrue /admin/users endpoint supports a ?filter= parameter that
+    does a LIKE match on email, phone, and user metadata. This avoids
+    fetching all users just to find one.
+
+    Returns a list of user dicts, or None if the request fails.
+    """
+    supabase_url = os.getenv('SUPABASE_URL')
+    service_key = os.getenv('SUPABASE_SERVICE_KEY')
+    if not supabase_url or not service_key:
+        return None
+
+    try:
+        url = f'{supabase_url.rstrip("/")}/auth/v1/admin/users'
+        resp = http_requests.get(
+            url,
+            params={'filter': filter_value, 'page': 1, 'per_page': 50},
+            headers={
+                'Authorization': f'Bearer {service_key}',
+                'apikey': service_key,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            # GoTrue returns {"users": [...]} or just a list
+            if isinstance(data, dict):
+                return data.get('users', [])
+            if isinstance(data, list):
+                return data
+        logger.warning(f'GoTrue filter request returned status {resp.status_code}')
+        return None
+    except Exception as e:
+        logger.warning(f'GoTrue filter request failed: {e}')
+        return None
+
+
 def get_supabase_user_by_email(email: str):
     """Look up a Supabase Auth user by email.
 
+    Uses the GoTrue admin API ?filter= parameter for server-side filtering.
+    Falls back to iterating all users if the filtered request fails.
+
     Returns None if not found.
     """
+    # Try filtered API call first (efficient)
+    filtered_users = _gotrue_admin_list_users_filtered(email)
+    if filtered_users is not None:
+        for user in filtered_users:
+            user_email = user.get('email') if isinstance(user, dict) else getattr(user, 'email', None)
+            if user_email == email:
+                return user
+        return None
+
+    # Fallback: iterate all users via SDK
     client = get_supabase_client()
     if not client:
         raise RuntimeError('Supabase client not available')
 
     try:
+        logger.info('Falling back to list_users() for email lookup')
         users = client.auth.admin.list_users()
         for user in users:
             if hasattr(user, 'email') and user.email == email:
@@ -188,13 +243,27 @@ def get_supabase_user_by_email(email: str):
 def get_supabase_user_by_phone(phone: str):
     """Look up a Supabase Auth user by phone number.
 
+    Uses the GoTrue admin API ?filter= parameter for server-side filtering.
+    Falls back to iterating all users if the filtered request fails.
+
     Returns None if not found.
     """
+    # Try filtered API call first (efficient)
+    filtered_users = _gotrue_admin_list_users_filtered(phone)
+    if filtered_users is not None:
+        for user in filtered_users:
+            user_phone = user.get('phone') if isinstance(user, dict) else getattr(user, 'phone', None)
+            if user_phone == phone:
+                return user
+        return None
+
+    # Fallback: iterate all users via SDK
     client = get_supabase_client()
     if not client:
         raise RuntimeError('Supabase client not available')
 
     try:
+        logger.info('Falling back to list_users() for phone lookup')
         users = client.auth.admin.list_users()
         for user in users:
             if hasattr(user, 'phone') and user.phone == phone:
