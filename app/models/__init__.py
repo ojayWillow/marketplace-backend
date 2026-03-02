@@ -10,7 +10,6 @@ from .offering import Offering
 from .favorite import Favorite
 from .translation_cache import TranslationCache
 from .notification import Notification, NotificationType
-from .password_reset import PasswordResetToken
 from .push_subscription import PushSubscription
 from .dispute import Dispute
 
@@ -27,7 +26,6 @@ __all__ = [
     'TranslationCache', 
     'Notification', 
     'NotificationType',
-    'PasswordResetToken',
     'PushSubscription',
     'Dispute'
 ]
