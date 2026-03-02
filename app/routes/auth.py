@@ -114,17 +114,43 @@ def _generate_legacy_jwt(user):
     return jwt.encode(payload, SECRET_KEY, algorithm='HS256')
 
 
-def _build_session_response(user, is_new_user, supabase_session=None):
+def _get_supabase_session(user, phone=None, email=None, password=None):
+    """Generate a Supabase session for a user.
+
+    Attempts to generate a Supabase session using the given credentials.
+    Returns None if Supabase is not available or session generation fails.
+    """
+    supabase_user_id = user.supabase_user_id
+    if not supabase_user_id:
+        return None
+
+    try:
+        from app.services.supabase_auth import generate_supabase_session
+        return generate_supabase_session(
+            email=email or user.email,
+            phone=phone or user.phone,
+            password=password,
+            supabase_user_id=supabase_user_id,
+        )
+    except Exception as e:
+        current_app.logger.error(
+            f'Supabase session generation failed for user {user.id}: {e}'
+        )
+        current_app.logger.debug(traceback.format_exc())
+        return None
+
+
+def _build_session_response(user, message, supabase_session=None, **extra):
     """Build a standardized auth response with session tokens.
 
     If supabase_session is available, uses Supabase tokens.
     Otherwise falls back to legacy JWT with a warning.
     """
     response_data = {
-        'message': 'Phone verification successful',
+        'message': message,
         'user': user.to_dict(),
-        'is_new_user': is_new_user,
     }
+    response_data.update(extra)
 
     if supabase_session:
         response_data['access_token'] = supabase_session['access_token']
@@ -311,23 +337,14 @@ def phone_verify():
         )
         
         # --- Generate Supabase session ---
-        supabase_session = None
-        if supabase_user_id:
-            try:
-                from app.services.supabase_auth import generate_supabase_session
-                supabase_session = generate_supabase_session(
-                    email=user.email,
-                    phone=normalized_phone,
-                    password=password_used,
-                    supabase_user_id=supabase_user_id,
-                )
-            except Exception as e:
-                current_app.logger.error(
-                    f'Supabase session generation failed for user {user.id}: {e}'
-                )
-                current_app.logger.debug(traceback.format_exc())
+        supabase_session = _get_supabase_session(
+            user, phone=normalized_phone, password=password_used
+        )
         
-        response_data = _build_session_response(user, is_new_user, supabase_session)
+        response_data = _build_session_response(
+            user, 'Phone verification successful',
+            supabase_session, is_new_user=is_new_user
+        )
         
         return jsonify(response_data), 200
         
@@ -341,7 +358,11 @@ def phone_verify():
 @auth_bp.route('/phone/link', methods=['POST'])
 @token_required
 def phone_link(current_user_id):
-    """Link a verified phone number to existing user account via Firebase."""
+    """Link a verified phone number to existing user account via Firebase.
+
+    After linking, returns a fresh Supabase session so the frontend
+    has up-to-date tokens reflecting the new phone number.
+    """
     try:
         try:
             from app.services.firebase import verify_firebase_token, normalize_phone_number as firebase_normalize
@@ -390,14 +411,23 @@ def phone_link(current_user_id):
         db.session.commit()
         
         # Ensure Supabase user exists with this phone
-        _ensure_supabase_user(user, phone=normalized_phone, email=user.email)
+        supabase_user_id, password_used = _ensure_supabase_user(
+            user, phone=normalized_phone, email=user.email
+        )
         
         current_app.logger.info(f"Phone linked to user {user.id}: {normalized_phone}")
         
-        return jsonify({
-            'message': 'Phone number verified and linked successfully',
-            'user': user.to_dict()
-        }), 200
+        # Generate fresh Supabase session
+        supabase_session = _get_supabase_session(
+            user, phone=normalized_phone, email=user.email, password=password_used
+        )
+        
+        response_data = _build_session_response(
+            user, 'Phone number verified and linked successfully',
+            supabase_session
+        )
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
         db.session.rollback()
@@ -414,6 +444,9 @@ def complete_registration(current_user_id):
     This is the single onboarding endpoint that every new user goes through
     exactly once after phone verification. Collects all required profile
     information in one call.
+
+    Returns a fresh Supabase session after onboarding so the frontend
+    has tokens with updated user metadata.
     
     Required fields: username, first_name, last_name
     Optional fields: email, country, city, skills, bio, job_alert_preferences
@@ -516,21 +549,21 @@ def complete_registration(current_user_id):
         db.session.commit()
         
         # Ensure Supabase user is created/linked (email may have been set now)
-        _ensure_supabase_user(user, phone=user.phone, email=user.email)
+        supabase_user_id, password_used = _ensure_supabase_user(
+            user, phone=user.phone, email=user.email
+        )
         
-        # Issue new JWT with updated username
-        payload = {
-            'user_id': user.id,
-            'username': user.username,
-            'exp': datetime.utcnow() + timedelta(hours=24)
-        }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        # Generate fresh Supabase session with updated user data
+        supabase_session = _get_supabase_session(
+            user, phone=user.phone, email=user.email, password=password_used
+        )
         
-        return jsonify({
-            'message': 'Registration completed successfully',
-            'access_token': token,
-            'user': user.to_dict()
-        }), 200
+        response_data = _build_session_response(
+            user, 'Registration completed successfully',
+            supabase_session
+        )
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
         db.session.rollback()
@@ -675,8 +708,6 @@ def get_profile(current_user_id):
             return jsonify({'error': 'User not found'}), 404
         
         user_data = user.to_dict()
-        # to_dict() already includes rating and review_count from the
-        # cached property. Add the legacy field names for compatibility.
         user_data['reviews_count'] = user.review_count
         user_data['average_rating'] = round(user.rating, 1) if user.rating else 0
         
@@ -695,12 +726,10 @@ def get_profile_full(current_user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Use efficient properties for rating stats
         profile_data = user.to_dict()
         profile_data['reviews_count'] = user.review_count
         profile_data['average_rating'] = round(user.rating, 1) if user.rating else 0
         
-        # Load reviews with reviewer data (eagerly) for the reviews list
         reviews_received = Review.query\
             .filter_by(reviewed_user_id=current_user_id)\
             .options(joinedload(Review.reviewer))\
@@ -813,7 +842,6 @@ def update_profile(current_user_id):
         
         data = request.get_json()
         
-        # Username change guard — only allowed if changes remaining > 0
         if 'username' in data:
             new_username = data['username'].lower().strip()
             if new_username != user.username:
@@ -884,22 +912,16 @@ def update_profile(current_user_id):
 
 @auth_bp.route('/users/<int:user_id>', methods=['GET'])
 def get_user_public(user_id):
-    """Get public profile of any user.
-    
-    Uses efficient batch queries for review stats and completed tasks
-    instead of loading all Review rows into memory.
-    """
+    """Get public profile of any user."""
     try:
         user = User.query.get(user_id)
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Efficient: uses cached single-query property
         avg_rating = user.rating or 0
         review_count = user.review_count
         
-        # Efficient: single COUNT query
         completed_tasks_count = TaskRequest.query.filter(
             or_(
                 TaskRequest.creator_id == user_id,
