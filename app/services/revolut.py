@@ -6,7 +6,8 @@ Uses sandbox or production URLs based on REVOLUT_ENVIRONMENT env var.
 Required env vars:
     REVOLUT_API_KEY: Revolut Merchant API secret key
     REVOLUT_WEBHOOK_SECRET: Secret for verifying webhook signatures
-    REVOLUT_ENVIRONMENT: 'sandbox' or 'production' (default: sandbox)
+    REVOLUT_ENVIRONMENT: 'dev', 'sandbox', or 'production' (default: sandbox)
+        - 'dev': skips real Revolut API, uses fake orders for local testing
     PAYMENT_REDIRECT_URL: URL to redirect after payment (e.g. https://app.kolab.lv/payment/callback)
 """
 
@@ -14,6 +15,7 @@ import os
 import hmac
 import hashlib
 import logging
+import uuid
 import requests
 
 logger = logging.getLogger(__name__)
@@ -40,11 +42,19 @@ def _get_config():
     }
 
 
+def _is_dev_mode():
+    """Check if running in dev mode (no real Revolut calls)."""
+    return os.getenv('REVOLUT_ENVIRONMENT', 'sandbox') == 'dev'
+
+
 def create_order(amount_cents, currency, description, order_metadata=None):
     """Create a Revolut payment order.
     
+    In dev mode, returns a fake order immediately without calling Revolut.
+    The fake checkout_url points to the local payment callback with auto-complete.
+    
     Args:
-        amount_cents: Amount in minor currency units (e.g. 200 = €2.00)
+        amount_cents: Amount in minor currency units (e.g. 200 = \u20ac2.00)
         currency: Three-letter currency code (e.g. 'EUR')
         description: Human-readable description shown on checkout
         order_metadata: Optional dict of metadata to attach to the order
@@ -53,6 +63,17 @@ def create_order(amount_cents, currency, description, order_metadata=None):
         dict with 'order_id' and 'checkout_url' on success
         None on failure
     """
+    # Dev mode: return fake order for local testing
+    if _is_dev_mode():
+        fake_order_id = f"dev_{uuid.uuid4().hex[:16]}"
+        redirect_url = os.getenv('PAYMENT_REDIRECT_URL', 'http://localhost:5173/payment/callback')
+        checkout_url = f"{redirect_url}?order_id={fake_order_id}"
+        logger.info(f"[DEV MODE] Fake order created: {fake_order_id} ({amount_cents} {currency})")
+        return {
+            'order_id': fake_order_id,
+            'checkout_url': checkout_url,
+        }
+    
     config = _get_config()
     
     if not config['api_key']:
@@ -110,11 +131,19 @@ def create_order(amount_cents, currency, description, order_metadata=None):
 def get_order(order_id):
     """Retrieve a Revolut order by ID.
     
-    Useful for polling payment status from the frontend.
+    In dev mode, returns a fake completed order so polling auto-activates the feature.
     
     Returns:
         dict with order details on success, None on failure
     """
+    # Dev mode: fake orders are always "completed"
+    if _is_dev_mode():
+        logger.info(f"[DEV MODE] get_order({order_id}) -> completed")
+        return {
+            'id': order_id,
+            'state': 'completed',
+        }
+    
     config = _get_config()
     
     if not config['api_key']:
@@ -138,6 +167,8 @@ def get_order(order_id):
 def verify_webhook_signature(payload_body, signature_header):
     """Verify Revolut webhook signature.
     
+    In dev mode, always returns True (no signature verification).
+    
     Args:
         payload_body: Raw request body (bytes)
         signature_header: Value of the 'Revolut-Signature' header
@@ -145,6 +176,11 @@ def verify_webhook_signature(payload_body, signature_header):
     Returns:
         True if signature is valid, False otherwise
     """
+    # Dev mode: skip signature verification
+    if _is_dev_mode():
+        logger.info("[DEV MODE] Webhook signature check bypassed")
+        return True
+    
     webhook_secret = os.getenv('REVOLUT_WEBHOOK_SECRET')
     
     if not webhook_secret:
