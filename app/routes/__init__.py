@@ -17,6 +17,7 @@ def api_health():
 def register_routes(app):
     """Register all route blueprints with the application."""
     from .auth import auth_bp
+    from .sync_user import sync_user_bp
     from .listings import listings_bp
     from .tasks import tasks_bp
     from .reviews import reviews_bp
@@ -34,6 +35,7 @@ def register_routes(app):
     
     # Register all other blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(sync_user_bp, url_prefix='/api/auth')  # Supabase Auth sync
     app.register_blueprint(listings_bp, url_prefix='/api/listings')
     app.register_blueprint(tasks_bp, url_prefix='/api/tasks')
     app.register_blueprint(reviews_bp, url_prefix='/api/reviews')
