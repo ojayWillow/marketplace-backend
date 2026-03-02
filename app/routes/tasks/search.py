@@ -182,6 +182,21 @@ def task_matches_search(task, search_patterns: list) -> bool:
     return False
 
 
+def _premium_sort_key(task_dict):
+    """Sort key for premium ordering: promoted first, then urgent, then regular.
+    
+    Returns an int where:
+    - 0 = active promoted
+    - 1 = active urgent
+    - 2 = regular
+    """
+    if task_dict.get('is_promote_active'):
+        return 0
+    if task_dict.get('is_urgent_active'):
+        return 1
+    return 2
+
+
 @tasks_bp.route('/search', methods=['GET'])
 def search_tasks():
     """Search for tasks with fuzzy matching and multilingual support.
@@ -192,6 +207,7 @@ def search_tasks():
     - Stem matching (sniegs finds sniegu)
     - Multilingual: searches original + all translations (LV, EN, RU)
     - User can search 'snow' and find Latvian task 'tīrīt sniegu'
+    - Premium sorting: promoted → urgent → regular
     
     Query params:
         - q: Search query string (required)
@@ -264,8 +280,8 @@ def search_tasks():
                     task_dict = translate_task_if_needed(task_dict, lang)
                     tasks_with_distance.append(task_dict)
             
-            # Sort by distance
-            tasks_with_distance.sort(key=lambda x: x['distance'])
+            # Sort: promoted first → urgent second → then by distance
+            tasks_with_distance.sort(key=lambda x: (_premium_sort_key(x), x['distance']))
             
             total = len(tasks_with_distance)
             start = (page - 1) * per_page
@@ -288,6 +304,9 @@ def search_tasks():
                 task_dict = translate_task_if_needed(task.to_dict(), lang)
                 task_dict['pending_applications_count'] = get_pending_applications_count(task.id)
                 tasks_list.append(task_dict)
+            
+            # Sort: promoted first → urgent second → then by date (already desc)
+            tasks_list.sort(key=lambda x: _premium_sort_key(x))
             
             total = len(tasks_list)
             start = (page - 1) * per_page
