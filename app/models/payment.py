@@ -37,11 +37,16 @@ class Payment(db.Model):
     user = db.relationship('User', backref=db.backref('payments', lazy='dynamic'))
     
     # Valid payment types and their prices in cents
+    # TODO: Restore real prices before launch:
+    #   'urgent_task': 200,       # €2.00
+    #   'promote_task': 500,      # €5.00
+    #   'promote_offering': 500,  # €5.00
+    #   'boost_offering': 100,    # €1.00
     PRICES = {
-        'urgent_task': 200,       # €2.00
-        'promote_task': 500,      # €5.00
-        'promote_offering': 500,  # €5.00
-        'boost_offering': 100,    # €1.00
+        'urgent_task': 0,         # FREE for testing
+        'promote_task': 0,        # FREE for testing
+        'promote_offering': 0,    # FREE for testing
+        'boost_offering': 0,      # FREE for testing
     }
     
     # Map payment type to the model it applies to
