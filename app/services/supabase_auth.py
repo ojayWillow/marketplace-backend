@@ -107,9 +107,15 @@ def generate_supabase_session(
 
         password = secrets.token_urlsafe(32)
         try:
-            admin_client.auth.admin.update_user(
+            # Also update email on the Supabase user if provided
+            update_attrs = {'password': password}
+            if email:
+                update_attrs['email'] = email
+                update_attrs['email_confirm'] = True
+
+            admin_client.auth.admin.update_user_by_id(
                 supabase_user_id,
-                {'password': password}
+                update_attrs
             )
             logger.debug(f'Reset password for Supabase user {supabase_user_id}')
         except Exception as e:
