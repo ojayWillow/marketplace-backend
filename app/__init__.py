@@ -99,7 +99,7 @@ def create_app(config_name=None):
     from app.models import (
         User, TaskRequest, TaskApplication, Listing, Review, 
         Message, Conversation, Notification, Offering, 
-        Favorite, PushSubscription, Dispute
+        Favorite, PushSubscription, Dispute, Payment
     )
     
     # Auto-create tables and constraints on startup

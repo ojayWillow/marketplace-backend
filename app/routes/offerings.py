@@ -16,75 +16,59 @@ offerings_bp = Blueprint('offerings', __name__)
 
 
 def get_bounding_box(lat, lng, radius_km):
-    """
-    Calculate a bounding box for a given center point and radius.
-    
-    This creates a square approximation that can be used for fast
-    SQL filtering before applying precise Haversine distance.
-    
-    Args:
-        lat: Center latitude in degrees
-        lng: Center longitude in degrees  
-        radius_km: Radius in kilometers
-    
-    Returns:
-        Tuple of (min_lat, max_lat, min_lng, max_lng)
-    """
-    # Earth's radius in km
     R = 6371.0
-    
-    # Convert radius to degrees (approximate)
-    # 1 degree latitude = ~111km
     lat_delta = radius_km / 111.0
-    
-    # 1 degree longitude varies by latitude
-    # At equator: ~111km, at poles: 0km
     lng_delta = radius_km / (111.0 * cos(radians(lat)))
-    
-    # Add 10% buffer to ensure we don't miss edge cases
     lat_delta *= 1.1
     lng_delta *= 1.1
-    
     return (
-        lat - lat_delta,  # min_lat
-        lat + lat_delta,  # max_lat
-        lng - lng_delta,  # min_lng
-        lng + lng_delta   # max_lng
+        lat - lat_delta,
+        lat + lat_delta,
+        lng - lng_delta,
+        lng + lng_delta
     )
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """Calculate the distance between two points on Earth using Haversine formula."""
-    R = 6371  # Earth's radius in kilometers
-    
+    R = 6371
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    
     a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
-    
     return R * c
 
 
 def translate_offering_if_needed(offering_dict: dict, lang: str | None) -> dict:
-    """Translate offering title and description if language is specified."""
     if not lang:
         return offering_dict
-    
     try:
         from app.services.translation import translate_offering
         return translate_offering(offering_dict, lang)
     except Exception as e:
-        # If translation fails, return original
         current_app.logger.error(f"Translation error: {e}")
         return offering_dict
+
+
+def _offering_sort_key(offering_dict):
+    """Sort key: promoted first, then boosted, then regular."""
+    if offering_dict.get('is_promote_active'):
+        return 0
+    if offering_dict.get('is_boost_active'):
+        return 1
+    return 2
 
 
 @offerings_bp.route('', methods=['GET'])
 @token_optional_g
 def get_offerings():
-    """Get all offerings with optional filtering, geolocation, and translation."""
+    """Get all offerings with optional filtering, geolocation, and translation.
+    
+    Sorting order:
+        1. Promoted offerings (paid) first
+        2. Boosted offerings (paid) second
+        3. Regular offerings by distance or date
+    """
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -92,31 +76,25 @@ def get_offerings():
         category = request.args.get('category')
         latitude = request.args.get('latitude', type=float)
         longitude = request.args.get('longitude', type=float)
-        radius = request.args.get('radius', 25, type=float)  # Default 25km
+        radius = request.args.get('radius', 25, type=float)
         boosted_only = request.args.get('boosted_only', 'false').lower() == 'true'
-        lang = request.args.get('lang')  # Language for translation
+        lang = request.args.get('lang')
         
         query = Offering.query
         
-        # Filter by status
         if status:
             query = query.filter(Offering.status == status)
         
-        # Filter by category (normalize legacy keys)
         if category:
             normalized = normalize_category(category)
             query = query.filter(Offering.category == normalized)
         
-        # Filter by boosted only (for map display)
         if boosted_only:
-            # Only return offerings that are boosted AND boost hasn't expired
             query = query.filter(
                 Offering.is_boosted == True,
                 Offering.boost_expires_at > datetime.utcnow()
             )
         
-        # Apply bounding box filter in SQL if coordinates provided
-        # This dramatically reduces the number of rows loaded into memory
         if latitude is not None and longitude is not None:
             min_lat, max_lat, min_lng, max_lng = get_bounding_box(latitude, longitude, radius)
             query = query.filter(
@@ -126,35 +104,36 @@ def get_offerings():
                 Offering.longitude <= max_lng
             )
         
-        # Order: boosted first, then by newest
+        # Base SQL ordering: promoted → boosted → regular, then newest
+        now = datetime.utcnow()
+        from sqlalchemy import case as sql_case
         query = query.order_by(
-            Offering.is_boosted.desc(),
+            sql_case(
+                (db.and_(Offering.is_promoted == True, Offering.promoted_expires_at > now), 0),
+                (db.and_(Offering.is_boosted == True, Offering.boost_expires_at > now), 1),
+                else_=2
+            ),
             Offering.created_at.desc()
         )
         
-        # Execute query - now only fetches offerings within bounding box
         offerings = query.all()
         
-        # Filter by precise distance if coordinates provided
         if latitude is not None and longitude is not None:
             filtered_offerings = []
             for offering in offerings:
-                distance = haversine_distance(
+                dist = haversine_distance(
                     latitude, longitude,
                     offering.latitude, offering.longitude
                 )
-                # Apply exact radius filter (bounding box is approximate)
-                if distance <= radius:
+                if dist <= radius:
                     offering_dict = offering.to_dict()
-                    offering_dict['distance'] = round(distance, 2)
-                    # Translate if language specified
+                    offering_dict['distance'] = round(dist, 2)
                     offering_dict = translate_offering_if_needed(offering_dict, lang)
                     filtered_offerings.append(offering_dict)
             
-            # Sort: boosted first, then by distance
-            filtered_offerings.sort(key=lambda x: (not x.get('is_boost_active', False), x['distance']))
+            # Sort: promoted first → boosted second → then by distance
+            filtered_offerings.sort(key=lambda x: (_offering_sort_key(x), x['distance']))
             
-            # Paginate
             start = (page - 1) * per_page
             end = start + per_page
             paginated = filtered_offerings[start:end]
@@ -165,7 +144,6 @@ def get_offerings():
                 'page': page
             }), 200
         else:
-            # Paginate without distance filter
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)
             
             offerings_list = [translate_offering_if_needed(o.to_dict(), lang) for o in paginated.items]
@@ -207,12 +185,10 @@ def get_user_offerings(user_id):
     try:
         lang = request.args.get('lang')
         
-        # Check if user exists
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Get only active offerings for this user
         offerings = Offering.query.filter_by(
             creator_id=user_id,
             status='active'
@@ -256,18 +232,15 @@ def create_offering():
     try:
         data = request.get_json()
         
-        # Validate required fields
         required_fields = ['title', 'description', 'category', 'location', 'latitude', 'longitude']
         for field in required_fields:
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
-        # Validate & normalize category (converts legacy keys automatically)
         category, cat_error = validate_category(data['category'])
         if cat_error:
             return jsonify({'error': cat_error}), 400
         
-        # Validate price range (skip for negotiable)
         price_type = data.get('price_type', 'hourly')
         price = data.get('price')
         if price_type != 'negotiable' and price is not None:
@@ -278,7 +251,7 @@ def create_offering():
         offering = Offering(
             title=data['title'],
             description=data['description'],
-            category=category,  # Use validated & normalized category
+            category=category,
             location=data['location'],
             latitude=data['latitude'],
             longitude=data['longitude'],
@@ -316,27 +289,23 @@ def update_offering(offering_id):
         if not offering:
             return jsonify({'error': 'Offering not found'}), 404
         
-        # Check ownership
         if offering.creator_id != g.current_user.id:
             return jsonify({'error': 'Unauthorized'}), 403
         
         data = request.get_json()
         
-        # Validate price range if provided (skip for negotiable)
         price_type = data.get('price_type', offering.price_type)
         if 'price' in data and data['price'] is not None and price_type != 'negotiable':
             error_response = validate_price_range(data['price'], 'Price')
             if error_response:
                 return error_response
         
-        # Validate & normalize category if provided
         if 'category' in data:
             category, cat_error = validate_category(data['category'])
             if cat_error:
                 return jsonify({'error': cat_error}), 400
             data['category'] = category
         
-        # Update fields if provided
         updateable_fields = [
             'title', 'description', 'category', 'location', 'latitude', 'longitude',
             'price', 'price_type', 'currency', 'availability', 'experience',
@@ -369,7 +338,6 @@ def delete_offering(offering_id):
         if not offering:
             return jsonify({'error': 'Offering not found'}), 404
         
-        # Check ownership
         if offering.creator_id != g.current_user.id:
             return jsonify({'error': 'Unauthorized'}), 403
         
@@ -393,7 +361,6 @@ def pause_offering(offering_id):
         if not offering:
             return jsonify({'error': 'Offering not found'}), 404
         
-        # Check ownership
         if offering.creator_id != g.current_user.id:
             return jsonify({'error': 'Unauthorized'}), 403
         
@@ -420,7 +387,6 @@ def activate_offering(offering_id):
         if not offering:
             return jsonify({'error': 'Offering not found'}), 404
         
-        # Check ownership
         if offering.creator_id != g.current_user.id:
             return jsonify({'error': 'Unauthorized'}), 403
         
@@ -440,42 +406,20 @@ def activate_offering(offering_id):
 @offerings_bp.route('/<int:offering_id>/boost', methods=['POST'])
 @token_required_g
 def boost_offering(offering_id):
-    """Boost an offering to show on the map (24-hour trial)."""
-    try:
-        offering = Offering.query.get(offering_id)
-        
-        if not offering:
-            return jsonify({'error': 'Offering not found'}), 404
-        
-        # Check ownership
-        if offering.creator_id != g.current_user.id:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        data = request.get_json() or {}
-        duration_hours = data.get('duration_hours', 24)  # Default 24 hours
-        
-        # For now, limit to 24 hours for free trial
-        # In the future, this can be extended with payment integration
-        max_free_hours = 24
-        duration_hours = min(duration_hours, max_free_hours)
-        
-        # Activate boost
-        offering.status = 'active'  # Also ensure status is active
-        offering.is_boosted = True
-        offering.boost_expires_at = datetime.utcnow() + timedelta(hours=duration_hours)
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': f'Offering boosted for {duration_hours} hours! It will now appear on the map.',
-            'offering': offering.to_dict(),
-            'boost_duration_hours': duration_hours,
-            'boost_expires_at': offering.boost_expires_at.isoformat()
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+    """Boost an offering — now requires payment.
+    
+    The free boost trial has ended. Use POST /api/payments/create-order
+    with type='boost_offering' instead.
+    
+    Returns 410 Gone with instructions to use the payments endpoint.
+    """
+    return jsonify({
+        'error': 'Free boost is no longer available. Please use the payments API.',
+        'payment_endpoint': '/api/payments/create-order',
+        'payment_type': 'boost_offering',
+        'price': '€1.00',
+        'duration': '24 hours'
+    }), 410
 
 
 @offerings_bp.route('/<int:offering_id>/contact', methods=['POST'])
@@ -488,14 +432,12 @@ def contact_offering_creator(offering_id):
         if not offering:
             return jsonify({'error': 'Offering not found'}), 404
         
-        # Can't contact yourself
         if offering.creator_id == g.current_user.id:
             return jsonify({'error': 'Cannot contact yourself'}), 400
         
         data = request.get_json()
         message_content = data.get('message', f"Hi! I'm interested in your offering: {offering.title}")
         
-        # Check for existing conversation
         existing_conv = Conversation.query.filter(
             ((Conversation.participant_1_id == g.current_user.id) & (Conversation.participant_2_id == offering.creator_id)) |
             ((Conversation.participant_1_id == offering.creator_id) & (Conversation.participant_2_id == g.current_user.id))
@@ -504,7 +446,6 @@ def contact_offering_creator(offering_id):
         if existing_conv:
             conversation = existing_conv
         else:
-            # Create new conversation
             conversation = Conversation(
                 participant_1_id=g.current_user.id,
                 participant_2_id=offering.creator_id,
@@ -513,7 +454,6 @@ def contact_offering_creator(offering_id):
             db.session.add(conversation)
             db.session.flush()
         
-        # Create message
         message = Message(
             conversation_id=conversation.id,
             sender_id=g.current_user.id,
@@ -521,7 +461,6 @@ def contact_offering_creator(offering_id):
         )
         db.session.add(message)
         
-        # Increment contact count
         offering.contact_count += 1
         
         db.session.commit()

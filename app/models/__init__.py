@@ -12,6 +12,7 @@ from .translation_cache import TranslationCache
 from .notification import Notification, NotificationType
 from .push_subscription import PushSubscription
 from .dispute import Dispute
+from .payment import Payment
 
 __all__ = [
     'User', 
@@ -27,5 +28,6 @@ __all__ = [
     'Notification', 
     'NotificationType',
     'PushSubscription',
-    'Dispute'
+    'Dispute',
+    'Payment',
 ]

@@ -30,6 +30,8 @@ class Offering(db.Model):
     # Boost/Premium visibility fields
     is_boosted = db.Column(db.Boolean, default=False, nullable=False, index=True)
     boost_expires_at = db.Column(db.DateTime, nullable=True)
+    is_promoted = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    promoted_expires_at = db.Column(db.DateTime, nullable=True)
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -44,6 +46,14 @@ class Offering(db.Model):
         if self.boost_expires_at is None:
             return False
         return datetime.utcnow() < self.boost_expires_at
+    
+    def is_promote_active(self):
+        """Check if the promotion is currently active (not expired)."""
+        if not self.is_promoted:
+            return False
+        if self.promoted_expires_at is None:
+            return False
+        return datetime.utcnow() < self.promoted_expires_at
     
     def to_dict(self):
         """Convert offering to dictionary.
@@ -100,6 +110,9 @@ class Offering(db.Model):
             'is_boosted': self.is_boosted,
             'is_boost_active': self.is_boost_active(),
             'boost_expires_at': self.boost_expires_at.isoformat() if self.boost_expires_at else None,
+            'is_promoted': self.is_promoted,
+            'is_promote_active': self.is_promote_active(),
+            'promoted_expires_at': self.promoted_expires_at.isoformat() if self.promoted_expires_at else None,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
