@@ -6,7 +6,7 @@ from sqlalchemy import func
 from app import db
 from app.models import TaskRequest, User, TaskApplication
 from app.utils import token_required
-from app.utils.auth import SECRET_KEY
+from app.utils.auth import _resolve_user_from_token
 from app.routes.tasks import tasks_bp
 from app.routes.tasks.helpers import (
     get_bounding_box,
@@ -16,7 +16,6 @@ from app.routes.tasks.helpers import (
 from app.routes.helpers import validate_price_range
 from app.constants.categories import validate_category, normalize_category
 from datetime import datetime
-import jwt
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,12 +30,10 @@ def get_current_user_id_optional():
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         return None
-    try:
-        token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
-        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-        return payload.get('user_id')
-    except:
+    user_id, error, status = _resolve_user_from_token(auth_header)
+    if error:
         return None
+    return user_id
 
 
 def get_pending_applications_counts(task_ids: list[int]) -> dict[int, int]:
