@@ -14,51 +14,87 @@ Note: This does NOT use @token_required because the user might not
 exist locally yet (that's the whole point of this endpoint).
 """
 
-from flask import Blueprint, request, jsonify, current_app
-from app import db
-from app.models import User
-import jwt
 import os
 import secrets
 import string
 import traceback
 from datetime import datetime
 
+from flask import Blueprint, request, jsonify, current_app
+from app import db
+from app.models import User
+import jwt as pyjwt
+from jwt import PyJWKClient
+
 sync_user_bp = Blueprint('sync_user', __name__)
 
 
 def _generate_temp_username():
     """Generate a temporary username for new users."""
-    random_suffix = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    random_suffix = ''.join(
+        secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8)
+    )
     return f"user_{random_suffix}"
 
 
 def _decode_supabase_token(auth_header):
     """Decode a Supabase JWT and return the payload.
 
+    Supports both ES256 (JWKS) and HS256 (JWT secret).
+
     Returns:
         (payload_dict, error_message, status_code)
     """
-    supabase_secret = os.getenv('SUPABASE_JWT_SECRET')
-    if not supabase_secret:
-        return None, 'Supabase Auth not configured', 501
-
     try:
         token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
     except (IndexError, AttributeError):
         return None, 'Token is missing', 401
 
     try:
-        payload = jwt.decode(
-            token, supabase_secret,
-            algorithms=['HS256'],
-            audience='authenticated'
-        )
+        unverified_header = pyjwt.get_unverified_header(token)
+        alg = unverified_header.get('alg', 'HS256')
+    except Exception:
+        return None, 'Invalid token', 401
+
+    try:
+        if alg.startswith('ES') or alg.startswith('RS') or alg.startswith('PS'):
+            # Asymmetric — use JWKS
+            supabase_url = os.getenv('SUPABASE_URL')
+            if not supabase_url:
+                return None, 'Supabase Auth not configured', 501
+
+            jwks_url = f'{supabase_url.rstrip("/")}/auth/v1/.well-known/jwks.json'
+            jwks_client = PyJWKClient(jwks_url, cache_keys=True)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+            payload = pyjwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[alg],
+                audience='authenticated',
+            )
+        else:
+            # Symmetric — use JWT secret
+            supabase_secret = os.getenv('SUPABASE_JWT_SECRET')
+            if not supabase_secret:
+                return None, 'Supabase Auth not configured', 501
+
+            payload = pyjwt.decode(
+                token,
+                supabase_secret,
+                algorithms=['HS256', 'HS384', 'HS512'],
+                audience='authenticated',
+            )
+
         return payload, None, None
-    except jwt.ExpiredSignatureError:
+
+    except pyjwt.ExpiredSignatureError:
         return None, 'Token has expired', 401
-    except jwt.InvalidTokenError as e:
-        current_app.logger.warning(f'Invalid Supabase token: {e}')
+    except pyjwt.InvalidTokenError as e:
+        current_app.logger.warning(f'Invalid Supabase token in sync-user: {e}')
+        return None, 'Invalid token', 401
+    except Exception as e:
+        current_app.logger.error(f'Token decode error in sync-user: {e}')
         return None, 'Invalid token', 401
 
 
@@ -137,14 +173,12 @@ def sync_user():
         if not username or len(username) < 3:
             username = _generate_temp_username()
         else:
-            # Validate and check uniqueness
             if len(username) > 30 or not username.replace('_', '').isalnum():
                 username = _generate_temp_username()
             elif User.query.filter_by(username=username).first():
                 username = _generate_temp_username()
 
         email = token_email or f"{username}@supabase.kolab.local"
-        # Ensure email uniqueness
         if User.query.filter_by(email=email).first():
             email = f"{username}_{secrets.token_hex(4)}@supabase.kolab.local"
 
@@ -159,7 +193,6 @@ def sync_user():
             is_verified=bool(token_email),
             onboarding_completed=False,
         )
-        # Set a random password (Supabase handles auth, this is just to satisfy the NOT NULL constraint)
         user.set_password(secrets.token_urlsafe(32))
 
         db.session.add(user)
