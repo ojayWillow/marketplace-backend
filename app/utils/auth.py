@@ -3,31 +3,23 @@
 This module provides JWT authentication decorators that can be used
 across all route files to ensure consistent authentication behavior.
 
-Supports TWO token types during migration:
-1. Supabase JWT (primary) - decoded using SUPABASE_JWT_SECRET, user looked up by `sub` -> supabase_user_id
-2. Legacy custom JWT (temporary) - decoded using JWT_SECRET_KEY, user looked up by `user_id` in payload
-
-Once all users are migrated to Supabase Auth, remove the legacy fallback (tracked in #53).
+All tokens are Supabase JWTs, decoded using SUPABASE_JWT_SECRET.
+Users are looked up by the `sub` claim -> User.supabase_user_id.
 """
 
 from functools import wraps
 from flask import request, jsonify, current_app, g
 import jwt
-import os
-
-# Legacy secret (kept for backward compatibility during migration)
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 
 def _get_supabase_jwt_secret():
     """Get Supabase JWT secret, return None if not configured."""
+    import os
     return os.getenv('SUPABASE_JWT_SECRET')
 
 
 def _resolve_user_from_token(auth_header):
-    """Decode token and resolve to local user_id.
-
-    Tries Supabase JWT first, falls back to legacy custom JWT.
+    """Decode Supabase JWT and resolve to local user_id.
 
     Returns:
         (user_id, error_message, status_code)
@@ -39,35 +31,23 @@ def _resolve_user_from_token(auth_header):
     except (IndexError, AttributeError):
         return None, 'Token is missing', 401
 
-    # --- Attempt 1: Supabase JWT ---
     supabase_secret = _get_supabase_jwt_secret()
-    if supabase_secret:
-        try:
-            payload = jwt.decode(token, supabase_secret, algorithms=['HS256'], audience='authenticated')
-            supabase_uid = payload.get('sub')
-            if supabase_uid:
-                from app.models import User
-                user = User.query.filter_by(supabase_user_id=supabase_uid).first()
-                if user:
-                    return user.id, None, None
-                # Supabase token is valid but user not synced yet
-                # This can happen on first login before /sync-user is called
-                current_app.logger.warning(
-                    f'Valid Supabase token but no local user for sub={supabase_uid}'
-                )
-                return None, 'User not found. Please complete registration.', 401
-        except jwt.ExpiredSignatureError:
-            return None, 'Token has expired', 401
-        except jwt.InvalidTokenError:
-            # Not a Supabase token, try legacy
-            pass
+    if not supabase_secret:
+        current_app.logger.error('SUPABASE_JWT_SECRET is not configured')
+        return None, 'Server authentication configuration error', 500
 
-    # --- Attempt 2: Legacy custom JWT (remove after migration #53) ---
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-        user_id = payload.get('user_id')
-        if user_id:
-            return user_id, None, None
+        payload = jwt.decode(token, supabase_secret, algorithms=['HS256'], audience='authenticated')
+        supabase_uid = payload.get('sub')
+        if supabase_uid:
+            from app.models import User
+            user = User.query.filter_by(supabase_user_id=supabase_uid).first()
+            if user:
+                return user.id, None, None
+            current_app.logger.warning(
+                f'Valid Supabase token but no local user for sub={supabase_uid}'
+            )
+            return None, 'User not found. Please complete registration.', 401
         return None, 'Token is invalid', 401
     except jwt.ExpiredSignatureError:
         return None, 'Token has expired', 401
@@ -76,9 +56,8 @@ def _resolve_user_from_token(auth_header):
 
 
 def token_required(f):
-    """Decorator to require valid JWT token.
+    """Decorator to require valid Supabase JWT token.
 
-    Supports both Supabase and legacy JWTs.
     Extracts user_id and passes it as the first argument.
     """
     @wraps(f)
@@ -97,7 +76,7 @@ def token_required(f):
 
 
 def token_optional(f):
-    """Decorator that optionally validates JWT token.
+    """Decorator that optionally validates Supabase JWT token.
 
     If a valid token is provided, extracts user_id. Otherwise, passes None.
     """
@@ -118,7 +97,7 @@ def token_optional(f):
 # ============ g.current_user variants ============
 
 def token_required_g(f):
-    """Decorator to require valid JWT token, setting g.current_user.
+    """Decorator to require valid Supabase JWT, setting g.current_user.
 
     Sets g.current_user to the full User object.
     Does NOT pass current_user_id as a parameter.
@@ -146,7 +125,7 @@ def token_required_g(f):
 
 
 def token_optional_g(f):
-    """Decorator for optional JWT authentication, setting g.current_user.
+    """Decorator for optional Supabase JWT authentication, setting g.current_user.
 
     Sets g.current_user to the User object if authenticated, None otherwise.
     """
