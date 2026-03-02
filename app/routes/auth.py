@@ -28,6 +28,77 @@ def generate_temp_password():
     return secrets.token_urlsafe(32)
 
 
+def _ensure_supabase_user(user, phone=None, email=None):
+    """Create a Supabase Auth user for a local user if they don't have one.
+
+    This is called during phone/verify and complete-registration to ensure
+    every user has a linked Supabase Auth account.
+
+    Args:
+        user: Local User model instance
+        phone: Phone number (E.164) to register with
+        email: Email to register with
+
+    Returns:
+        supabase_user_id (str) or None if Supabase is not configured
+    """
+    if user.supabase_user_id:
+        return user.supabase_user_id
+
+    try:
+        from app.services.supabase_auth import (
+            create_supabase_user,
+            get_supabase_user_by_phone,
+            get_supabase_user_by_email,
+        )
+    except (ImportError, RuntimeError):
+        current_app.logger.debug('Supabase not available, skipping user creation')
+        return None
+
+    try:
+        # Check if Supabase user already exists (e.g., created via another flow)
+        existing = None
+        if phone:
+            existing = get_supabase_user_by_phone(phone)
+        if not existing and email and not email.endswith('.kolab.local'):
+            existing = get_supabase_user_by_email(email)
+
+        if existing:
+            user.supabase_user_id = str(existing.id)
+            db.session.commit()
+            current_app.logger.info(
+                f'Linked existing Supabase user {existing.id} to local user {user.id}'
+            )
+            return user.supabase_user_id
+
+        # Create new Supabase Auth user
+        supabase_user = create_supabase_user(
+            phone=phone,
+            email=email if email and not email.endswith('.kolab.local') else None,
+            phone_confirm=True,
+            email_confirm=True,
+            user_metadata={
+                'local_user_id': user.id,
+                'username': user.username,
+            },
+        )
+
+        user.supabase_user_id = str(supabase_user.id)
+        db.session.commit()
+        current_app.logger.info(
+            f'Created Supabase user {supabase_user.id} for local user {user.id}'
+        )
+        return user.supabase_user_id
+
+    except Exception as e:
+        current_app.logger.error(
+            f'Failed to create Supabase user for local user {user.id}: {e}'
+        )
+        current_app.logger.debug(traceback.format_exc())
+        # Don't fail the request — legacy JWT still works
+        return None
+
+
 @auth_bp.route('/register', methods=['POST'])
 def register():
     """Register a new user account."""
@@ -118,6 +189,8 @@ def phone_verify():
     """Firebase phone verification endpoint.
     
     Verifies a Firebase ID token and creates/logs in the user.
+    Also creates a Supabase Auth user (if Supabase is configured)
+    so the user is ready for the new auth system.
     """
     try:
         try:
@@ -185,6 +258,10 @@ def phone_verify():
             
             current_app.logger.info(f"Phone login: new user created {user.id}")
         
+        # --- Create/link Supabase Auth user ---
+        _ensure_supabase_user(user, phone=normalized_phone)
+        
+        # Legacy JWT (still needed until frontend migrates to Supabase sessions)
         payload = {
             'user_id': user.id,
             'username': user.username,
@@ -192,12 +269,18 @@ def phone_verify():
         }
         token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
         
-        return jsonify({
+        response_data = {
             'message': 'Phone verification successful',
             'access_token': token,
             'user': user.to_dict(),
             'is_new_user': is_new_user
-        }), 200
+        }
+        
+        # Include supabase_user_id so frontend knows when it can switch to Supabase auth
+        if user.supabase_user_id:
+            response_data['supabase_user_id'] = user.supabase_user_id
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
         db.session.rollback()
@@ -256,6 +339,9 @@ def phone_link(current_user_id):
         user.updated_at = datetime.utcnow()
         
         db.session.commit()
+        
+        # Ensure Supabase user exists with this phone
+        _ensure_supabase_user(user, phone=normalized_phone, email=user.email)
         
         current_app.logger.info(f"Phone linked to user {user.id}: {normalized_phone}")
         
@@ -379,6 +465,9 @@ def complete_registration(current_user_id):
         user.updated_at = datetime.utcnow()
         
         db.session.commit()
+        
+        # Ensure Supabase user is created/linked (email may have been set now)
+        _ensure_supabase_user(user, phone=user.phone, email=user.email)
         
         # Issue new JWT with updated username
         payload = {
