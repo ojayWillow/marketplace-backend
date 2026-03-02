@@ -1,17 +1,14 @@
 """WebSocket events for real-time messaging and presence tracking."""
 
 from flask_socketio import emit, join_room, leave_room
-from flask import request
-import jwt
-import os
+from flask import request, current_app
 from app.models import Conversation, Message, User
 from app import db
+from app.utils.auth import _resolve_user_from_token
 import logging
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
-
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-here')
 
 # In-memory tracking of online users: {user_id: socket_id}
 online_users = {}
@@ -25,12 +22,20 @@ def utc_isoformat(dt):
 
 
 def get_user_from_token(token):
-    """Extract user ID from JWT token."""
+    """Extract user ID from Supabase JWT token.
+
+    Uses the shared Supabase JWT verification logic from app.utils.auth
+    which supports both ES256 (JWKS) and HS256 (JWT secret) algorithms.
+    Resolves the token's `sub` claim to a local user ID.
+    """
     try:
-        if token and token.startswith('Bearer '):
-            token = token.split(' ')[1]
-        data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-        return data.get('user_id')
+        if not token:
+            return None
+        user_id, error, status = _resolve_user_from_token(token)
+        if error:
+            logger.warning(f"Socket token error: {error}")
+            return None
+        return user_id
     except Exception as e:
         logger.error(f"Token decode error: {e}")
         return None
