@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_socketio import SocketIO
 import os
@@ -11,7 +10,6 @@ load_dotenv()
 
 db = SQLAlchemy()
 migrate = Migrate()
-jwt_manager = JWTManager()
 socketio = SocketIO()
 
 def create_app(config_name=None):
@@ -44,16 +42,9 @@ def create_app(config_name=None):
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
-    # JWT Configuration (kept for flask-jwt-extended init, but not used for auth)
-    app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-here')
-    app.config['JWT_TOKEN_LOCATION'] = ['headers']
-    app.config['JWT_HEADER_NAME'] = 'Authorization'
-    app.config['JWT_HEADER_TYPE'] = 'Bearer'
-    
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
-    jwt_manager.init_app(app)
     
     # Allowed origins for CORS
     allowed_origins = [
