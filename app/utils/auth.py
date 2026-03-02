@@ -37,7 +37,19 @@ def _resolve_user_from_token(auth_header):
         return None, 'Server authentication configuration error', 500
 
     try:
-        payload = jwt.decode(token, supabase_secret, algorithms=['HS256'], audience='authenticated')
+        # First peek at the token header to see what algorithm it uses
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+            current_app.logger.debug(f'JWT header: {unverified_header}')
+        except Exception as he:
+            current_app.logger.warning(f'Could not read JWT header: {he}')
+
+        payload = jwt.decode(
+            token,
+            supabase_secret,
+            algorithms=['HS256', 'HS384', 'HS512'],
+            audience='authenticated',
+        )
         supabase_uid = payload.get('sub')
         if supabase_uid:
             from app.models import User
@@ -51,7 +63,8 @@ def _resolve_user_from_token(auth_header):
         return None, 'Token is invalid', 401
     except jwt.ExpiredSignatureError:
         return None, 'Token has expired', 401
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        current_app.logger.warning(f'Invalid Supabase token: {e}')
         return None, 'Token is invalid', 401
 
 
