@@ -49,6 +49,8 @@ def create_supabase_user(
         password = secrets.token_urlsafe(32)
 
     attrs = {'password': password}
+    # Always include email — Supabase sign_in_with_password works reliably
+    # with email but is flaky with phone. Include placeholder emails too.
     if email:
         attrs['email'] = email
         attrs['email_confirm'] = email_confirm
@@ -74,9 +76,12 @@ def generate_supabase_session(
     Uses sign_in_with_password via the anon client. If no password is known,
     sets a new random password via admin API first, then signs in.
 
+    IMPORTANT: Always uses email for sign-in (even placeholder .kolab.local
+    emails) because Supabase sign_in_with_password with phone is unreliable.
+
     Args:
-        email: User email (used for sign-in if available)
-        phone: User phone (used for sign-in if email not available)
+        email: User email (used for sign-in — preferred)
+        phone: User phone (fallback only if no email at all)
         password: Known password for the user
         supabase_user_id: Supabase user UUID (needed to reset password if unknown)
 
@@ -112,17 +117,16 @@ def generate_supabase_session(
             return None
 
     # Sign in to get a real session
+    # ALWAYS prefer email (even placeholder .kolab.local) over phone.
+    # Supabase sign_in_with_password with phone is unreliable/broken.
     try:
         credentials = {'password': password}
 
-        # Prefer email for sign-in (more reliable), fall back to phone
-        if email and not email.endswith('.kolab.local'):
+        if email:
             credentials['email'] = email
         elif phone:
+            # Last resort — phone sign-in is unreliable but try anyway
             credentials['phone'] = phone
-        elif email:
-            # Use placeholder email as last resort
-            credentials['email'] = email
         else:
             logger.error('No email or phone available for sign-in')
             return None
