@@ -31,10 +31,14 @@ def _ensure_supabase_user(user, phone=None, email=None):
     This is called during phone/verify and complete-registration to ensure
     every user has a linked Supabase Auth account.
 
+    IMPORTANT: Always pass user.email (even placeholder .kolab.local) so
+    that Supabase user is created with an email. This is required because
+    sign_in_with_password with phone is unreliable.
+
     Args:
         user: Local User model instance
         phone: Phone number (E.164) to register with
-        email: Email to register with
+        email: Email to register with (including placeholder emails)
 
     Returns:
         Tuple of (supabase_user_id, password_used) or (supabase_user_id, None)
@@ -70,9 +74,10 @@ def _ensure_supabase_user(user, phone=None, email=None):
             return user.supabase_user_id, None
 
         # Create new Supabase Auth user
+        # ALWAYS include email (even placeholder) so sign_in_with_password works
         supabase_user, password_used = create_supabase_user(
             phone=phone,
-            email=email if email and not email.endswith('.kolab.local') else None,
+            email=email or user.email,
             phone_confirm=True,
             email_confirm=True,
             user_metadata={
@@ -100,6 +105,7 @@ def _get_supabase_session(user, phone=None, email=None, password=None):
     """Generate a Supabase session for a user.
 
     Attempts to generate a Supabase session using the given credentials.
+    Always passes email (even placeholder) for reliable sign-in.
     Returns None if Supabase is not available or session generation fails.
     """
     supabase_user_id = user.supabase_user_id
@@ -227,13 +233,15 @@ def phone_verify():
             current_app.logger.info(f"Phone login: new user created {user.id}")
         
         # --- Create/link Supabase Auth user ---
+        # Always pass email (even placeholder) so Supabase user has an email
+        # for reliable sign_in_with_password
         supabase_user_id, password_used = _ensure_supabase_user(
-            user, phone=normalized_phone
+            user, phone=normalized_phone, email=user.email
         )
         
         # --- Generate Supabase session ---
         supabase_session = _get_supabase_session(
-            user, phone=normalized_phone, password=password_used
+            user, phone=normalized_phone, email=user.email, password=password_used
         )
         
         response_data = _build_session_response(
