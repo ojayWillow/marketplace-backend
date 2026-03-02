@@ -29,17 +29,32 @@ class TaskRequest(db.Model):
     deadline = db.Column(db.DateTime, nullable=True)
     responses_count = db.Column(db.Integer, default=0, nullable=False)
     is_urgent = db.Column(db.Boolean, default=False, nullable=False)
+    urgent_expires_at = db.Column(db.DateTime, nullable=True)
+    is_promoted = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    promoted_expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
     
-    # Payment fields - TEMPORARILY REMOVED until migration is applied
-    # payment_required = db.Column(db.Boolean, default=False, nullable=False, index=True)  # Whether task requires upfront payment
-    # payment_status = db.Column(db.String(20), default='not_required', nullable=False, index=True)
-    # transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True, index=True)  # Link to payment
-    
     # Note: Relationships are defined in User model with eager loading.
     # Use self.creator and self.assigned_user (backref names from User model)
+    
+    def is_urgent_active(self):
+        """Check if the urgent status is currently active (not expired)."""
+        if not self.is_urgent:
+            return False
+        if self.urgent_expires_at is None:
+            # Legacy urgent tasks without expiration are always active
+            return True
+        return datetime.utcnow() < self.urgent_expires_at
+    
+    def is_promote_active(self):
+        """Check if the promotion is currently active (not expired)."""
+        if not self.is_promoted:
+            return False
+        if self.promoted_expires_at is None:
+            return False
+        return datetime.utcnow() < self.promoted_expires_at
     
     def to_dict(self):
         """Convert task request to dictionary.
@@ -113,12 +128,14 @@ class TaskRequest(db.Model):
             'deadline': self.deadline.isoformat() + 'Z' if self.deadline else None,
             'responses_count': self.responses_count,
             'is_urgent': self.is_urgent,
+            'is_urgent_active': self.is_urgent_active(),
+            'urgent_expires_at': self.urgent_expires_at.isoformat() + 'Z' if self.urgent_expires_at else None,
+            'is_promoted': self.is_promoted,
+            'is_promote_active': self.is_promote_active(),
+            'promoted_expires_at': self.promoted_expires_at.isoformat() + 'Z' if self.promoted_expires_at else None,
             'created_at': self.created_at.isoformat() + 'Z',
             'updated_at': self.updated_at.isoformat() + 'Z',
             'completed_at': self.completed_at.isoformat() + 'Z' if self.completed_at else None,
-            # Payment fields removed temporarily
-            # 'payment_required': self.payment_required,
-            # 'payment_status': self.payment_status,
         }
     
     def __repr__(self):
