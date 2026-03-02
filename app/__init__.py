@@ -5,7 +5,6 @@ from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_socketio import SocketIO
 import os
-import jwt
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -45,7 +44,7 @@ def create_app(config_name=None):
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
-    # JWT Configuration
+    # JWT Configuration (kept for flask-jwt-extended init, but not used for auth)
     app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-here')
     app.config['JWT_TOKEN_LOCATION'] = ['headers']
     app.config['JWT_HEADER_NAME'] = 'Authorization'
@@ -159,6 +158,23 @@ def create_app(config_name=None):
                 columns = [col['name'] for col in inspector.get_columns('messages')]
                 print(f"[STARTUP] Messages table columns: {columns}")
             
+            # MIGRATION: Add supabase_user_id column to users table if it doesn't exist
+            if not app.config.get('TESTING', False):
+                try:
+                    user_columns = [col['name'] for col in inspector.get_columns('users')]
+                    if 'supabase_user_id' not in user_columns:
+                        print("[STARTUP] Adding supabase_user_id column to users table...")
+                        db.session.execute(db.text(
+                            'ALTER TABLE users ADD COLUMN supabase_user_id VARCHAR(36) UNIQUE'
+                        ))
+                        db.session.execute(db.text(
+                            'CREATE INDEX IF NOT EXISTS ix_users_supabase_user_id ON users (supabase_user_id)'
+                        ))
+                        db.session.commit()
+                        print("[STARTUP] ✓ Added supabase_user_id column")
+                except Exception as e:
+                    print(f"[STARTUP] supabase_user_id migration note: {e}")
+            
             # Add unique constraint for task applications (prevent duplicate applications)
             # Note: TaskApplication model already defines this via __table_args__,
             # so db.create_all() handles it. This is just a safety net for production.
@@ -206,25 +222,18 @@ def create_app(config_name=None):
             if not auth_header:
                 return
             
-            # Extract token from "Bearer <token>"
-            token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
+            from app.utils.auth import _resolve_user_from_token
+            user_id, error, status = _resolve_user_from_token(auth_header)
+            if error or not user_id:
+                return
             
-            # Decode using the same method as route decorators
-            secret_key = app.config['JWT_SECRET_KEY']
-            payload = jwt.decode(token, secret_key, algorithms=['HS256'])
-            user_id = payload.get('user_id')
-            
-            if user_id:
-                from app.models import User
-                user = User.query.get(user_id)
-                if user:
-                    user.update_last_seen()
-                    db.session.commit()
-        except jwt.ExpiredSignatureError:
-            # Token expired - don't update last_seen, but don't break request
-            pass
+            from app.models import User
+            user = User.query.get(user_id)
+            if user:
+                user.update_last_seen()
+                db.session.commit()
         except Exception:
-            # Silently ignore other errors - don't break the request
+            # Silently ignore errors - don't break the request
             pass
     
     # Health check route with debug info
