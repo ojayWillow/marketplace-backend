@@ -171,6 +171,72 @@ except Exception as e:
     print(f'[HOTFIX] Warning: {e}')
 " 2>&1 || echo "[HOTFIX] Warning: onboarding hotfix failed"
 
+# Hotfix: add premium/payment columns for Revolut integration (#68)
+echo "[HOTFIX] Ensuring premium columns exist on task_requests..."
+python -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    # task_requests: urgent_expires_at, is_promoted, promoted_expires_at
+    cur.execute('ALTER TABLE task_requests ADD COLUMN IF NOT EXISTS urgent_expires_at TIMESTAMP')
+    cur.execute('ALTER TABLE task_requests ADD COLUMN IF NOT EXISTS is_promoted BOOLEAN NOT NULL DEFAULT false')
+    cur.execute('ALTER TABLE task_requests ADD COLUMN IF NOT EXISTS promoted_expires_at TIMESTAMP')
+    cur.execute('CREATE INDEX IF NOT EXISTS ix_task_requests_is_promoted ON task_requests(is_promoted)')
+    print('[HOTFIX] task_requests premium columns ready')
+    conn.close()
+except Exception as e:
+    print(f'[HOTFIX] Warning: {e}')
+" 2>&1 || echo "[HOTFIX] Warning: task_requests premium hotfix failed"
+
+echo "[HOTFIX] Ensuring premium columns exist on offerings..."
+python -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    # offerings: is_promoted, promoted_expires_at (is_boosted + boost_expires_at already exist)
+    cur.execute('ALTER TABLE offerings ADD COLUMN IF NOT EXISTS is_promoted BOOLEAN NOT NULL DEFAULT false')
+    cur.execute('ALTER TABLE offerings ADD COLUMN IF NOT EXISTS promoted_expires_at TIMESTAMP')
+    cur.execute('CREATE INDEX IF NOT EXISTS ix_offerings_is_promoted ON offerings(is_promoted)')
+    print('[HOTFIX] offerings premium columns ready')
+    conn.close()
+except Exception as e:
+    print(f'[HOTFIX] Warning: {e}')
+" 2>&1 || echo "[HOTFIX] Warning: offerings premium hotfix failed"
+
+echo "[HOTFIX] Ensuring payments table exists..."
+python -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS payments (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            revolut_order_id VARCHAR(100) NOT NULL UNIQUE,
+            type VARCHAR(30) NOT NULL,
+            entity_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL,
+            currency VARCHAR(3) NOT NULL DEFAULT '"'"'EUR'"'"',
+            status VARCHAR(20) NOT NULL DEFAULT '"'"'pending'"'"',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMP
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS ix_payments_user_id ON payments(user_id)')
+    cur.execute('CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_revolut_order_id ON payments(revolut_order_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS ix_payments_status ON payments(status)')
+    print('[HOTFIX] payments table ready')
+    conn.close()
+except Exception as e:
+    print(f'[HOTFIX] Warning: {e}')
+" 2>&1 || echo "[HOTFIX] Warning: payments table hotfix failed"
+
 # Stamp Alembic version to latest head so future migrations chain correctly
 echo "[ALEMBIC] Checking migration state..."
 python -c "
