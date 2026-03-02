@@ -40,10 +40,11 @@ def _ensure_supabase_user(user, phone=None, email=None):
         email: Email to register with
 
     Returns:
-        supabase_user_id (str) or None if Supabase is not configured
+        Tuple of (supabase_user_id, password_used) or (supabase_user_id, None)
+        password_used is the password set on the Supabase user (needed for session generation)
     """
     if user.supabase_user_id:
-        return user.supabase_user_id
+        return user.supabase_user_id, None
 
     try:
         from app.services.supabase_auth import (
@@ -53,7 +54,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
         )
     except (ImportError, RuntimeError):
         current_app.logger.debug('Supabase not available, skipping user creation')
-        return None
+        return None, None
 
     try:
         # Check if Supabase user already exists (e.g., created via another flow)
@@ -69,10 +70,10 @@ def _ensure_supabase_user(user, phone=None, email=None):
             current_app.logger.info(
                 f'Linked existing Supabase user {existing.id} to local user {user.id}'
             )
-            return user.supabase_user_id
+            return user.supabase_user_id, None
 
         # Create new Supabase Auth user
-        supabase_user = create_supabase_user(
+        supabase_user, password_used = create_supabase_user(
             phone=phone,
             email=email if email and not email.endswith('.kolab.local') else None,
             phone_confirm=True,
@@ -88,7 +89,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
         current_app.logger.info(
             f'Created Supabase user {supabase_user.id} for local user {user.id}'
         )
-        return user.supabase_user_id
+        return user.supabase_user_id, password_used
 
     except Exception as e:
         current_app.logger.error(
@@ -96,7 +97,51 @@ def _ensure_supabase_user(user, phone=None, email=None):
         )
         current_app.logger.debug(traceback.format_exc())
         # Don't fail the request — legacy JWT still works
-        return None
+        return None, None
+
+
+def _generate_legacy_jwt(user):
+    """Generate a legacy custom JWT for backward compatibility.
+
+    Only used as a fallback when Supabase session generation fails.
+    Will be removed once all clients use Supabase sessions.
+    """
+    payload = {
+        'user_id': user.id,
+        'username': user.username,
+        'exp': datetime.utcnow() + timedelta(hours=24)
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+
+
+def _build_session_response(user, is_new_user, supabase_session=None):
+    """Build a standardized auth response with session tokens.
+
+    If supabase_session is available, uses Supabase tokens.
+    Otherwise falls back to legacy JWT with a warning.
+    """
+    response_data = {
+        'message': 'Phone verification successful',
+        'user': user.to_dict(),
+        'is_new_user': is_new_user,
+    }
+
+    if supabase_session:
+        response_data['access_token'] = supabase_session['access_token']
+        response_data['refresh_token'] = supabase_session['refresh_token']
+        response_data['expires_in'] = supabase_session['expires_in']
+        response_data['expires_at'] = supabase_session['expires_at']
+        response_data['token_type'] = 'supabase'
+    else:
+        # Fallback to legacy JWT — log warning
+        current_app.logger.warning(
+            f'Falling back to legacy JWT for user {user.id} — '
+            'Supabase session generation failed'
+        )
+        response_data['access_token'] = _generate_legacy_jwt(user)
+        response_data['token_type'] = 'legacy'
+
+    return response_data
 
 
 @auth_bp.route('/register', methods=['POST'])
@@ -189,8 +234,10 @@ def phone_verify():
     """Firebase phone verification endpoint.
     
     Verifies a Firebase ID token and creates/logs in the user.
-    Also creates a Supabase Auth user (if Supabase is configured)
-    so the user is ready for the new auth system.
+    Creates a Supabase Auth user and returns a Supabase session
+    (access_token + refresh_token) for the frontend to use.
+
+    Falls back to legacy JWT if Supabase session generation fails.
     """
     try:
         try:
@@ -259,26 +306,28 @@ def phone_verify():
             current_app.logger.info(f"Phone login: new user created {user.id}")
         
         # --- Create/link Supabase Auth user ---
-        _ensure_supabase_user(user, phone=normalized_phone)
+        supabase_user_id, password_used = _ensure_supabase_user(
+            user, phone=normalized_phone
+        )
         
-        # Legacy JWT (still needed until frontend migrates to Supabase sessions)
-        payload = {
-            'user_id': user.id,
-            'username': user.username,
-            'exp': datetime.utcnow() + timedelta(hours=24)
-        }
-        token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+        # --- Generate Supabase session ---
+        supabase_session = None
+        if supabase_user_id:
+            try:
+                from app.services.supabase_auth import generate_supabase_session
+                supabase_session = generate_supabase_session(
+                    email=user.email,
+                    phone=normalized_phone,
+                    password=password_used,
+                    supabase_user_id=supabase_user_id,
+                )
+            except Exception as e:
+                current_app.logger.error(
+                    f'Supabase session generation failed for user {user.id}: {e}'
+                )
+                current_app.logger.debug(traceback.format_exc())
         
-        response_data = {
-            'message': 'Phone verification successful',
-            'access_token': token,
-            'user': user.to_dict(),
-            'is_new_user': is_new_user
-        }
-        
-        # Include supabase_user_id so frontend knows when it can switch to Supabase auth
-        if user.supabase_user_id:
-            response_data['supabase_user_id'] = user.supabase_user_id
+        response_data = _build_session_response(user, is_new_user, supabase_session)
         
         return jsonify(response_data), 200
         
