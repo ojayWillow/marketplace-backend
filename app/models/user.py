@@ -21,6 +21,7 @@ class User(db.Model):
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
+    supabase_user_id = db.Column(db.String(36), unique=True, nullable=True, index=True)  # Supabase Auth UUID
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     phone = db.Column(db.String(20), nullable=True)
