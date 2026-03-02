@@ -2,7 +2,7 @@
 
 from flask import request, jsonify
 from sqlalchemy.orm import joinedload
-from sqlalchemy import func
+from sqlalchemy import func, case
 from app import db
 from app.models import TaskRequest, User, TaskApplication
 from app.utils import token_required
@@ -20,9 +20,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RADIUS_KM = 25  # Default search radius in km — keep in sync with frontend
-MIN_RESULTS_DEFAULT = 5  # Minimum results before auto-expanding radius
-RADIUS_EXPANSION_STEPS = [50, 100, 200, 500]  # km steps to try if initial radius returns too few
+DEFAULT_RADIUS_KM = 25
+MIN_RESULTS_DEFAULT = 5
+RADIUS_EXPANSION_STEPS = [50, 100, 200, 500]
 
 
 def get_current_user_id_optional():
@@ -37,13 +37,8 @@ def get_current_user_id_optional():
 
 
 def get_pending_applications_counts(task_ids: list[int]) -> dict[int, int]:
-    """
-    Get pending applications count for multiple tasks in a SINGLE query.
-    Returns dict mapping task_id -> count
-    """
     if not task_ids:
         return {}
-    
     try:
         results = db.session.query(
             TaskApplication.task_id,
@@ -52,8 +47,6 @@ def get_pending_applications_counts(task_ids: list[int]) -> dict[int, int]:
             TaskApplication.task_id.in_(task_ids),
             TaskApplication.status == 'pending'
         ).group_by(TaskApplication.task_id).all()
-        
-        # Convert to dict, defaulting to 0 for tasks with no applications
         counts = {task_id: 0 for task_id in task_ids}
         for task_id, count in results:
             counts[task_id] = count
@@ -64,13 +57,8 @@ def get_pending_applications_counts(task_ids: list[int]) -> dict[int, int]:
 
 
 def get_user_applied_task_ids(user_id: int | None, task_ids: list[int]) -> set[int]:
-    """
-    Get set of task IDs that the user has applied to (any status).
-    Returns empty set if user_id is None or no applications found.
-    """
     if not user_id or not task_ids:
         return set()
-    
     try:
         results = db.session.query(TaskApplication.task_id).filter(
             TaskApplication.task_id.in_(task_ids),
@@ -83,34 +71,41 @@ def get_user_applied_task_ids(user_id: int | None, task_ids: list[int]) -> set[i
 
 
 def batch_translate_tasks(tasks_list: list[dict], lang: str | None) -> list[dict]:
-    """
-    Translate multiple tasks efficiently.
-    Only translates if lang is provided and translation is enabled.
-    """
     if not lang or not tasks_list:
         return tasks_list
-    
-    # Quick check if translation is even enabled
     try:
         from app.services.translation import is_translation_enabled
         if not is_translation_enabled():
             return tasks_list
     except:
         return tasks_list
-    
-    # Translate each task (translation service handles caching)
-    # Future optimization: could batch all texts in single API call
     for task in tasks_list:
         task = translate_task_if_needed(task, lang)
-    
     return tasks_list
+
+
+def _premium_sort_key(task_dict):
+    """Sort key for premium ordering: promoted first, then urgent, then regular.
+    
+    Returns a tuple (priority_tier, secondary) where:
+    - priority_tier 0 = active promoted
+    - priority_tier 1 = active urgent
+    - priority_tier 2 = regular
+    """
+    if task_dict.get('is_promote_active'):
+        return (0,)
+    if task_dict.get('is_urgent_active'):
+        return (1,)
+    return (2,)
 
 
 def _find_tasks_within_radius(base_query, latitude, longitude, radius_km):
     """Find tasks within a given radius from coordinates.
     
-    Returns list of (task_id, task_dict) tuples sorted by distance.
-    Uses bounding box pre-filter + Haversine exact distance.
+    Returns list of (task_id, task_dict) tuples sorted by:
+    1. Promoted tasks first
+    2. Urgent tasks second
+    3. Then by distance
     """
     min_lat, max_lat, min_lng, max_lng = get_bounding_box(latitude, longitude, radius_km)
     query = base_query.filter(
@@ -132,7 +127,10 @@ def _find_tasks_within_radius(base_query, latitude, longitude, radius_km):
             task_dict['distance'] = round(dist, 2)
             tasks_with_distance.append((task.id, task_dict))
     
-    tasks_with_distance.sort(key=lambda x: x[1]['distance'])
+    # Sort: promoted first → urgent second → then by distance
+    tasks_with_distance.sort(
+        key=lambda x: (*_premium_sort_key(x[1]), x[1]['distance'])
+    )
     return tasks_with_distance
 
 
@@ -145,24 +143,14 @@ def get_tasks():
         - latitude, longitude: User location
         - radius: Search radius in km (default 25)
         - min_results: Minimum results before auto-expanding radius (default 5).
-                       If initial radius returns fewer than this, backend expands
-                       the radius automatically in steps until enough are found.
-                       Set to 0 to disable auto-expansion.
         - status: Task status filter (default 'open')
-        - category: Category filter. Supports comma-separated values for
-                    multi-category filtering (e.g. "cleaning,delivery,repair")
+        - category: Category filter. Supports comma-separated values.
         - page, per_page: Pagination
     
-    Response includes:
-        - tasks: list of task objects with distance
-        - total: total matching tasks
-        - effective_radius: the actual radius used (may differ from requested
-                           if auto-expanded)
-        - radius_expanded: boolean, true if radius was auto-expanded beyond
-                          the requested value
-    
-    If authenticated, each task includes:
-        - has_applied: boolean indicating if current user has applied
+    Sorting order:
+        1. Promoted tasks (paid) first
+        2. Urgent tasks (paid) second
+        3. Regular tasks by distance or date
     """
     try:
         page = request.args.get('page', 1, type=int)
@@ -175,7 +163,6 @@ def get_tasks():
         min_results = request.args.get('min_results', MIN_RESULTS_DEFAULT, type=int)
         lang = request.args.get('lang')
         
-        # Defensive: warn if radius was explicitly sent without coordinates
         if request.args.get('radius') and (latitude is None or longitude is None):
             logger.warning(
                 'GET /api/tasks: radius=%s provided without latitude/longitude — '
@@ -183,17 +170,13 @@ def get_tasks():
                 request.args.get('radius')
             )
         
-        # Get current user ID if authenticated (for has_applied check)
         current_user_id = get_current_user_id_optional()
         
-        # Build base query with eager loading
         query = TaskRequest.query.options(
             joinedload(TaskRequest.creator),
             joinedload(TaskRequest.assigned_user)
         ).filter_by(status=status)
         
-        # Support comma-separated categories (e.g. "cleaning,delivery")
-        # Normalize legacy keys so filtering works correctly
         if category:
             categories = [normalize_category(c.strip()) for c in category.split(',') if c.strip()]
             if len(categories) == 1:
@@ -201,30 +184,24 @@ def get_tasks():
             elif len(categories) > 1:
                 query = query.filter(TaskRequest.category.in_(categories))
         
-        # If location filtering is requested
         if latitude is not None and longitude is not None:
             effective_radius = radius
             radius_expanded = False
             
-            # Initial search at requested radius
             tasks_with_distance = _find_tasks_within_radius(query, latitude, longitude, radius)
             
-            # Smart radius expansion: if too few results, expand step by step
             if min_results > 0 and len(tasks_with_distance) < min_results:
                 for expanded_radius in RADIUS_EXPANSION_STEPS:
                     if expanded_radius <= radius:
-                        continue  # Skip steps smaller than initial radius
-                    
+                        continue
                     tasks_with_distance = _find_tasks_within_radius(
                         query, latitude, longitude, expanded_radius
                     )
                     effective_radius = expanded_radius
                     radius_expanded = True
-                    
                     if len(tasks_with_distance) >= min_results:
                         break
                 
-                # Final fallback: if still not enough, get ALL tasks with distance
                 if len(tasks_with_distance) < min_results:
                     all_geo_tasks = query.filter(
                         TaskRequest.latitude.isnot(None),
@@ -238,10 +215,11 @@ def get_tasks():
                         task_dict['distance'] = round(dist, 2)
                         tasks_with_distance.append((task.id, task_dict))
                     
-                    tasks_with_distance.sort(key=lambda x: x[1]['distance'])
+                    tasks_with_distance.sort(
+                        key=lambda x: (*_premium_sort_key(x[1]), x[1]['distance'])
+                    )
                     
                     if tasks_with_distance:
-                        # effective_radius = distance to the farthest returned task
                         effective_radius = tasks_with_distance[-1][1]['distance']
                     radius_expanded = True
                     
@@ -251,27 +229,21 @@ def get_tasks():
                         len(tasks_with_distance), latitude, longitude, radius
                     )
             
-            # Pagination
             total = len(tasks_with_distance)
             start = (page - 1) * per_page
             end = start + per_page
             paginated = tasks_with_distance[start:end]
             
-            # Get task IDs and dicts
             task_ids = [t[0] for t in paginated]
             tasks_list = [t[1] for t in paginated]
             
-            # BATCH: Get all pending counts in ONE query
             pending_counts = get_pending_applications_counts(task_ids)
-            
-            # BATCH: Get user's applied task IDs in ONE query
             user_applied_ids = get_user_applied_task_ids(current_user_id, task_ids)
             
             for i, task_dict in enumerate(tasks_list):
                 task_dict['pending_applications_count'] = pending_counts.get(task_ids[i], 0)
                 task_dict['has_applied'] = task_ids[i] in user_applied_ids
             
-            # BATCH: Translate all tasks
             tasks_list = batch_translate_tasks(tasks_list, lang)
             
             return jsonify({
@@ -284,27 +256,31 @@ def get_tasks():
                 'radius_expanded': radius_expanded,
             }), 200
         else:
-            # No location filtering
-            tasks = query.order_by(TaskRequest.created_at.desc()).paginate(page=page, per_page=per_page)
+            # No location: sort promoted → urgent → newest
+            now = datetime.utcnow()
+            tasks = query.order_by(
+                case(
+                    (db.and_(TaskRequest.is_promoted == True, TaskRequest.promoted_expires_at > now), 0),
+                    (db.and_(TaskRequest.is_urgent == True, TaskRequest.urgent_expires_at > now), 1),
+                    (db.and_(TaskRequest.is_urgent == True, TaskRequest.urgent_expires_at.is_(None)), 1),
+                    else_=2
+                ),
+                TaskRequest.created_at.desc()
+            ).paginate(page=page, per_page=per_page)
             
-            # Convert to dicts and collect IDs
             task_ids = []
             tasks_list = []
             for task in tasks.items:
                 task_ids.append(task.id)
                 tasks_list.append(task.to_dict())
             
-            # BATCH: Get all pending counts in ONE query
             pending_counts = get_pending_applications_counts(task_ids)
-            
-            # BATCH: Get user's applied task IDs in ONE query
             user_applied_ids = get_user_applied_task_ids(current_user_id, task_ids)
             
             for i, task_dict in enumerate(tasks_list):
                 task_dict['pending_applications_count'] = pending_counts.get(task_ids[i], 0)
                 task_dict['has_applied'] = task_ids[i] in user_applied_ids
             
-            # BATCH: Translate all tasks
             tasks_list = batch_translate_tasks(tasks_list, lang)
             
             return jsonify({
@@ -324,12 +300,7 @@ def get_tasks():
 
 @tasks_bp.route('/<int:task_id>', methods=['GET'])
 def get_task(task_id):
-    """Get a specific task request by ID.
-    
-    If authenticated, also returns:
-        - has_applied: boolean indicating if user has applied
-        - user_application: the user's application object if exists
-    """
+    """Get a specific task request by ID."""
     try:
         lang = request.args.get('lang')
         
@@ -342,14 +313,11 @@ def get_task(task_id):
         
         task_dict = task.to_dict()
         
-        # Single query for this task's pending count
         pending_counts = get_pending_applications_counts([task_id])
         task_dict['pending_applications_count'] = pending_counts.get(task_id, 0)
         
-        # Translate if needed
         task_dict = translate_task_if_needed(task_dict, lang)
         
-        # Check if current user has applied (if authenticated)
         current_user_id = get_current_user_id_optional()
         if current_user_id:
             existing_application = TaskApplication.query.filter_by(
@@ -370,20 +338,12 @@ def get_task(task_id):
 @tasks_bp.route('', methods=['POST'])
 @token_required
 def create_task(current_user_id):
-    """Create a new task request.
-    
-    Requires authentication. The creator_id is extracted from the JWT
-    token — any creator_id sent in the request body is ignored.
-    
-    After creation, sends job alert notifications to nearby users
-    who have matching preferences (category + radius).
-    """
+    """Create a new task request."""
     try:
         data = request.get_json()
         
         logger.info(f'Creating task for user {current_user_id} with data: {data}')
         
-        # creator_id comes from JWT token, not from request body
         if data.get('creator_id') and data['creator_id'] != current_user_id:
             logger.warning(
                 f'create_task: body creator_id={data["creator_id"]} differs from '
@@ -395,12 +355,10 @@ def create_task(current_user_id):
             missing = [k for k in required_fields if k not in data]
             return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
         
-        # Validate & normalize category (converts legacy keys automatically)
         category, cat_error = validate_category(data['category'])
         if cat_error:
             return jsonify({'error': cat_error}), 400
         
-        # Validate budget range
         budget = data.get('budget')
         if budget is not None:
             error_response = validate_price_range(budget, 'Budget')
@@ -414,16 +372,14 @@ def create_task(current_user_id):
             except ValueError:
                 return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
         
-        # Validate difficulty
         difficulty = data.get('difficulty', 'medium')
         if difficulty not in ['easy', 'medium', 'hard']:
             return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
         
-        # Create task — creator_id from JWT, not request body
         task = TaskRequest(
             title=data['title'],
             description=data['description'],
-            category=category,  # Use validated & normalized category
+            category=category,
             location=data['location'],
             latitude=data['latitude'],
             longitude=data['longitude'],
@@ -441,9 +397,6 @@ def create_task(current_user_id):
         
         logger.info(f'Task created successfully: {task.id}, category: {task.category}, difficulty: {task.difficulty}, images: {task.images}')
         
-        # --- Job Alerts: notify nearby users asynchronously ---
-        # Runs after commit so the task has an ID. Wrapped in try/except
-        # so a notification failure never blocks task creation.
         try:
             from app.services.job_alerts import send_job_alerts_for_task
             alerts_sent = send_job_alerts_for_task(task)
@@ -465,11 +418,7 @@ def create_task(current_user_id):
 @tasks_bp.route('/<int:task_id>', methods=['PUT'])
 @token_required
 def update_task(current_user_id, task_id):
-    """Update an existing task request.
-    
-    Requires authentication. Only the task creator can edit.
-    Only open tasks can be edited.
-    """
+    """Update an existing task request."""
     try:
         task = TaskRequest.query.get(task_id)
         if not task:
@@ -487,38 +436,28 @@ def update_task(current_user_id, task_id):
         
         logger.info(f'Updating task {task_id} for user {current_user_id} with data: {data}')
         
-        # Validate budget range if provided
         if 'budget' in data and data['budget'] is not None:
             error_response = validate_price_range(data['budget'], 'Budget')
             if error_response:
                 return error_response
         
-        # Update allowed fields
         if 'title' in data and data['title'].strip():
             task.title = data['title'].strip()
-        
         if 'description' in data and data['description'].strip():
             task.description = data['description'].strip()
-        
         if 'category' in data:
-            # Validate & normalize category
             category, cat_error = validate_category(data['category'])
             if cat_error:
                 return jsonify({'error': cat_error}), 400
             task.category = category
-        
         if 'location' in data and data['location'].strip():
             task.location = data['location'].strip()
-        
         if 'latitude' in data:
             task.latitude = data['latitude']
-        
         if 'longitude' in data:
             task.longitude = data['longitude']
-        
         if 'budget' in data:
             task.budget = data['budget']
-        
         if 'deadline' in data:
             if data['deadline']:
                 try:
@@ -527,12 +466,10 @@ def update_task(current_user_id, task_id):
                     return jsonify({'error': 'Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM)'}), 400
             else:
                 task.deadline = None
-        
         if 'difficulty' in data:
             if data['difficulty'] not in ['easy', 'medium', 'hard']:
                 return jsonify({'error': 'Invalid difficulty. Must be easy, medium, or hard'}), 400
             task.difficulty = data['difficulty']
-        
         if 'images' in data:
             task.images = data['images']
         
