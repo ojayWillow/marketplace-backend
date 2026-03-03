@@ -19,6 +19,9 @@ def create_app(config_name=None):
     if config_name is None:
         config_name = os.environ.get('FLASK_ENV', 'development')
     
+    # ── JSON encoding: preserve emoji / Unicode in responses ────────────
+    app.config['JSON_AS_ASCII'] = False
+    
     # Get database URL from environment
     database_url = (
         os.environ.get('DATABASE_URL') 
