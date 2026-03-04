@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+from urllib.parse import urlparse
 from pywebpush import webpush, WebPushException
 from app import db
 from app.models import PushSubscription, User
@@ -15,14 +16,12 @@ logging.basicConfig(level=logging.INFO)
 # VAPID keys - these should be set in environment variables
 VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
-VAPID_CLAIMS = {
-    'sub': os.getenv('VAPID_SUBJECT', 'mailto:support@tirgus.lv')
-}
+VAPID_SUBJECT = os.getenv('VAPID_SUBJECT', os.getenv('VAPID_CLAIMS_EMAIL', 'mailto:support@tirgus.lv'))
 
 # Log VAPID configuration status on module load
 logger.info(f'[PUSH] VAPID_PUBLIC_KEY configured: {bool(VAPID_PUBLIC_KEY)} (length: {len(VAPID_PUBLIC_KEY)})')
 logger.info(f'[PUSH] VAPID_PRIVATE_KEY configured: {bool(VAPID_PRIVATE_KEY)} (length: {len(VAPID_PRIVATE_KEY)})')
-logger.info(f'[PUSH] VAPID_CLAIMS: {VAPID_CLAIMS}')
+logger.info(f'[PUSH] VAPID_SUBJECT: {VAPID_SUBJECT}')
 
 
 def _get_user_lang(user_id: int) -> str:
@@ -34,6 +33,20 @@ def _get_user_lang(user_id: int) -> str:
     except Exception:
         pass
     return 'lv'
+
+
+def _get_vapid_claims(endpoint: str) -> dict:
+    """Build VAPID claims with the correct 'aud' for the push service.
+    
+    Apple's web.push.apple.com requires 'aud' to match the push service origin.
+    FCM works without it but including it is correct per the spec.
+    """
+    parsed = urlparse(endpoint)
+    aud = f'{parsed.scheme}://{parsed.netloc}'
+    return {
+        'sub': VAPID_SUBJECT,
+        'aud': aud,
+    }
 
 
 def send_push_notification(user_id: int, title: str, body: str, 
@@ -74,7 +87,7 @@ def send_push_notification(user_id: int, title: str, body: str,
         logger.warning(f'[PUSH] No active subscriptions for user {user_id}')
         return {'sent': 0, 'failed': 0, 'error': 'No active subscriptions'}
     
-    # Build notification payload - ensure all values are JSON-serializable primitives
+    # Build notification payload
     payload = {
         'title': str(title) if title else '',
         'body': str(body) if body else '',
@@ -86,7 +99,6 @@ def send_push_notification(user_id: int, title: str, body: str,
         }
     }
     
-    # Try to serialize payload to catch any circular reference issues
     try:
         payload_json = json.dumps(payload)
         logger.info(f'[PUSH] Payload: {payload_json}')
@@ -110,11 +122,15 @@ def send_push_notification(user_id: int, title: str, body: str,
                 }
             }
             
+            # Build per-subscription VAPID claims with correct 'aud'
+            claims = _get_vapid_claims(subscription.endpoint)
+            logger.info(f'[PUSH] VAPID claims: {claims}')
+            
             response = webpush(
                 subscription_info=subscription_info,
-                data=payload_json,  # Use pre-serialized payload
+                data=payload_json,
                 vapid_private_key=VAPID_PRIVATE_KEY,
-                vapid_claims=VAPID_CLAIMS
+                vapid_claims=claims
             )
             
             logger.info(f'[PUSH] SUCCESS - Notification sent to subscription {subscription.id}')
