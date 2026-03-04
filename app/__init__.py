@@ -169,6 +169,24 @@ def create_app(config_name=None):
                 except Exception as e:
                     print(f"[STARTUP] supabase_user_id migration note: {e}")
             
+            # MIGRATION: Rename revolut_order_id -> stripe_session_id in payments table
+            if not app.config.get('TESTING', False):
+                try:
+                    if 'payments' in tables:
+                        payment_columns = [col['name'] for col in inspector.get_columns('payments')]
+                        if 'revolut_order_id' in payment_columns and 'stripe_session_id' not in payment_columns:
+                            print("[STARTUP] Renaming revolut_order_id -> stripe_session_id in payments table...")
+                            db.session.execute(db.text(
+                                'ALTER TABLE payments RENAME COLUMN revolut_order_id TO stripe_session_id'
+                            ))
+                            db.session.execute(db.text(
+                                'ALTER TABLE payments ALTER COLUMN stripe_session_id TYPE VARCHAR(200)'
+                            ))
+                            db.session.commit()
+                            print("[STARTUP] ✓ Renamed revolut_order_id to stripe_session_id")
+                except Exception as e:
+                    print(f"[STARTUP] payments migration note: {e}")
+            
             # Add unique constraint for task applications (prevent duplicate applications)
             # Note: TaskApplication model already defines this via __table_args__,
             # so db.create_all() handles it. This is just a safety net for production.
