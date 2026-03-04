@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from app import db
 from app.models import User, Review, Listing, Offering, TaskRequest, TaskApplication
 from app.utils import token_required
+from app.i18n import get_supported_languages
 from datetime import datetime, timedelta
 import traceback
 import secrets
@@ -358,7 +359,7 @@ def complete_registration(current_user_id):
     has tokens with updated user metadata.
     
     Required fields: username, first_name, last_name
-    Optional fields: email, country, city, skills, bio, job_alert_preferences
+    Optional fields: email, country, city, skills, bio, job_alert_preferences, preferred_language
     """
     try:
         user = User.query.get(current_user_id)
@@ -448,6 +449,12 @@ def complete_registration(current_user_id):
         # Job alert preferences (optional)
         if 'job_alert_preferences' in data and isinstance(data['job_alert_preferences'], dict):
             user.set_job_alert_prefs(data['job_alert_preferences'])
+        
+        # Preferred language (optional)
+        if 'preferred_language' in data:
+            lang = data['preferred_language'].strip().lower()
+            if lang in get_supported_languages():
+                user.preferred_language = lang
         
         # ── Mark onboarding as completed ────────────────────────────────
         
@@ -722,6 +729,12 @@ def update_profile(current_user_id):
             user.latitude = data['latitude']
         if 'longitude' in data:
             user.longitude = data['longitude']
+        
+        # Preferred language
+        if 'preferred_language' in data:
+            lang = data['preferred_language'].strip().lower()
+            if lang in get_supported_languages():
+                user.preferred_language = lang
         
         user.updated_at = datetime.utcnow()
         db.session.commit()
