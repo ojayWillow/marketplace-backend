@@ -171,6 +171,21 @@ except Exception as e:
     print(f'[HOTFIX] Warning: {e}')
 " 2>&1 || echo "[HOTFIX] Warning: onboarding hotfix failed"
 
+# Hotfix: add preferred_language column to users table
+echo "[HOTFIX] Ensuring preferred_language column exists on users table..."
+python -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(10) DEFAULT 'lv'")
+    print('[HOTFIX] preferred_language column ready')
+    conn.close()
+except Exception as e:
+    print(f'[HOTFIX] Warning: {e}')
+" 2>&1 || echo "[HOTFIX] Warning: preferred_language hotfix failed"
+
 # Hotfix: add premium/payment columns for Revolut integration (#68)
 echo "[HOTFIX] Ensuring premium columns exist on task_requests..."
 python -c "
