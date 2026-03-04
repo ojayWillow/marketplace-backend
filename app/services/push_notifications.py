@@ -6,6 +6,7 @@ import logging
 from pywebpush import webpush, WebPushException
 from app import db
 from app.models import PushSubscription, User
+from app.i18n import get_text
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -22,6 +23,17 @@ VAPID_CLAIMS = {
 logger.info(f'[PUSH] VAPID_PUBLIC_KEY configured: {bool(VAPID_PUBLIC_KEY)} (length: {len(VAPID_PUBLIC_KEY)})')
 logger.info(f'[PUSH] VAPID_PRIVATE_KEY configured: {bool(VAPID_PRIVATE_KEY)} (length: {len(VAPID_PRIVATE_KEY)})')
 logger.info(f'[PUSH] VAPID_CLAIMS: {VAPID_CLAIMS}')
+
+
+def _get_user_lang(user_id: int) -> str:
+    """Look up a user's preferred language. Falls back to 'lv'."""
+    try:
+        user = db.session.get(User, user_id)
+        if user and user.preferred_language:
+            return user.preferred_language
+    except Exception:
+        pass
+    return 'lv'
 
 
 def send_push_notification(user_id: int, title: str, body: str, 
@@ -144,57 +156,49 @@ def send_push_notification(user_id: int, title: str, body: str,
 
 def notify_new_message(recipient_id: int, sender_name: str, message_preview: str, 
                        conversation_id: int):
-    """
-    Send push notification for new message.
-    """
-    logger.info(f'[PUSH] notify_new_message called - recipient: {recipient_id}, sender: {sender_name}')
+    """Send push notification for new message."""
+    lang = _get_user_lang(recipient_id)
     return send_push_notification(
         user_id=recipient_id,
-        title=f'\U0001f4ac {sender_name}',
+        title=get_text('push.new_message.title', lang, name=sender_name),
         body=message_preview[:100] + ('...' if len(message_preview) > 100 else ''),
         url=f'/messages/{conversation_id}',
-        tag=f'message-{conversation_id}'  # Replace previous messages from same conversation
+        tag=f'message-{conversation_id}'
     )
 
 
 def notify_application_received(task_owner_id: int, applicant_name: str, 
                                  task_title: str, task_id: int):
-    """
-    Send push notification when someone applies to a task.
-    """
-    logger.info(f'[PUSH] notify_application_received called - owner: {task_owner_id}')
+    """Send push notification when someone applies to a task."""
+    lang = _get_user_lang(task_owner_id)
     return send_push_notification(
         user_id=task_owner_id,
-        title='\U0001f44b New Application!',
-        body=f'{applicant_name} applied for "{task_title}"',
+        title=get_text('push.application_received.title', lang),
+        body=get_text('push.application_received.body', lang, name=applicant_name, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'application-{task_id}'
     )
 
 
 def notify_application_accepted(applicant_id: int, task_title: str, task_id: int):
-    """
-    Send push notification when application is accepted.
-    """
-    logger.info(f'[PUSH] notify_application_accepted called - applicant: {applicant_id}')
+    """Send push notification when application is accepted."""
+    lang = _get_user_lang(applicant_id)
     return send_push_notification(
         user_id=applicant_id,
-        title='\U0001f389 Application Accepted!',
-        body=f'You got the job! "{task_title}"',
+        title=get_text('push.application_accepted.title', lang),
+        body=get_text('push.application_accepted.body', lang, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'accepted-{task_id}'
     )
 
 
 def notify_application_rejected(applicant_id: int, task_title: str):
-    """
-    Send push notification when application is rejected.
-    """
-    logger.info(f'[PUSH] notify_application_rejected called - applicant: {applicant_id}')
+    """Send push notification when application is rejected."""
+    lang = _get_user_lang(applicant_id)
     return send_push_notification(
         user_id=applicant_id,
-        title='Application Update',
-        body=f'Your application for "{task_title}" was not selected.',
+        title=get_text('push.application_rejected.title', lang),
+        body=get_text('push.application_rejected.body', lang, title=task_title),
         url='/tasks',
         tag='application-rejected'
     )
@@ -202,56 +206,48 @@ def notify_application_rejected(applicant_id: int, task_title: str):
 
 def notify_task_marked_done(task_owner_id: int, worker_name: str, 
                             task_title: str, task_id: int):
-    """
-    Send push notification when worker marks task as done.
-    """
-    logger.info(f'[PUSH] notify_task_marked_done called - owner: {task_owner_id}')
+    """Send push notification when worker marks task as done."""
+    lang = _get_user_lang(task_owner_id)
     return send_push_notification(
         user_id=task_owner_id,
-        title='\u2705 Task Completed',
-        body=f'{worker_name} finished "{task_title}". Please review.',
+        title=get_text('push.task_marked_done.title', lang),
+        body=get_text('push.task_marked_done.body', lang, name=worker_name, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'done-{task_id}'
     )
 
 
 def notify_task_confirmed(worker_id: int, task_title: str, task_id: int):
-    """
-    Send push notification when task owner confirms completion.
-    """
-    logger.info(f'[PUSH] notify_task_confirmed called - worker: {worker_id}')
+    """Send push notification when task owner confirms completion."""
+    lang = _get_user_lang(worker_id)
     return send_push_notification(
         user_id=worker_id,
-        title='\U0001f31f Great job!',
-        body=f'"{task_title}" has been confirmed complete.',
+        title=get_text('push.task_confirmed.title', lang),
+        body=get_text('push.task_confirmed.body', lang, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'confirmed-{task_id}'
     )
 
 
 def notify_task_disputed(user_id: int, task_title: str, task_id: int):
-    """
-    Send push notification when a task is disputed.
-    """
-    logger.info(f'[PUSH] notify_task_disputed called - user: {user_id}')
+    """Send push notification when a task is disputed."""
+    lang = _get_user_lang(user_id)
     return send_push_notification(
         user_id=user_id,
-        title='\u26a0\ufe0f Task Disputed',
-        body=f'A dispute has been raised for "{task_title}". Please check.',
+        title=get_text('push.task_disputed.title', lang),
+        body=get_text('push.task_disputed.body', lang, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'disputed-{task_id}'
     )
 
 
 def notify_task_cancelled(user_id: int, task_title: str, task_id: int):
-    """
-    Send push notification when a task is cancelled by the creator.
-    """
-    logger.info(f'[PUSH] notify_task_cancelled called - user: {user_id}')
+    """Send push notification when a task is cancelled by the creator."""
+    lang = _get_user_lang(user_id)
     return send_push_notification(
         user_id=user_id,
-        title='\u274c Task Cancelled',
-        body=f'The task "{task_title}" has been cancelled.',
+        title=get_text('push.task_cancelled.title', lang),
+        body=get_text('push.task_cancelled.body', lang, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'cancelled-{task_id}'
     )
@@ -259,15 +255,13 @@ def notify_task_cancelled(user_id: int, task_title: str, task_id: int):
 
 def notify_new_review(user_id: int, reviewer_name: str, task_title: str,
                       task_id: int, rating: int):
-    """
-    Send push notification when someone leaves a review for you.
-    """
-    logger.info(f'[PUSH] notify_new_review called - user: {user_id}')
+    """Send push notification when someone leaves a review for you."""
+    lang = _get_user_lang(user_id)
     stars = '\u2b50' * min(rating, 5)
     return send_push_notification(
         user_id=user_id,
-        title=f'{stars} New Review!',
-        body=f'{reviewer_name} left a review for "{task_title}".',
+        title=get_text('push.new_review.title', lang, stars=stars),
+        body=get_text('push.new_review.body', lang, name=reviewer_name, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'review-{task_id}'
     )
@@ -275,14 +269,12 @@ def notify_new_review(user_id: int, reviewer_name: str, task_title: str,
 
 def notify_new_job_nearby(user_id: int, task_title: str, task_id: int, 
                           distance_km: float):
-    """
-    Send push notification for new job posted nearby.
-    """
-    logger.info(f'[PUSH] notify_new_job_nearby called - user: {user_id}')
+    """Send push notification for new job posted nearby."""
+    lang = _get_user_lang(user_id)
     return send_push_notification(
         user_id=user_id,
-        title='\U0001f4bc New Job Nearby!',
-        body=f'"{task_title}" - {distance_km:.1f}km away',
+        title=get_text('push.new_job_nearby.title', lang),
+        body=get_text('push.new_job_nearby.body', lang, title=task_title, distance=f'{distance_km:.1f}'),
         url=f'/tasks/{task_id}',
         tag='new-job-nearby'
     )
@@ -290,14 +282,12 @@ def notify_new_job_nearby(user_id: int, task_title: str, task_id: int,
 
 def notify_review_reminder(user_id: int, other_party_name: str, 
                            task_title: str, task_id: int):
-    """
-    Send push notification reminding user to leave a review after task completion.
-    """
-    logger.info(f'[PUSH] notify_review_reminder called - user: {user_id}')
+    """Send push notification reminding user to leave a review after task completion."""
+    lang = _get_user_lang(user_id)
     return send_push_notification(
         user_id=user_id,
-        title='\u270d\ufe0f Leave a Review',
-        body=f'How was working with {other_party_name} on "{task_title}"?',
+        title=get_text('push.review_reminder.title', lang),
+        body=get_text('push.review_reminder.body', lang, name=other_party_name, title=task_title),
         url=f'/tasks/{task_id}',
         tag=f'review-reminder-{task_id}'
     )

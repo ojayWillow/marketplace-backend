@@ -2,6 +2,7 @@
 
 import os
 import requests
+from app.i18n import get_text
 
 
 class EmailService:
@@ -85,7 +86,7 @@ class EmailService:
             print(f"[EMAIL] Failed to send email to {to_email}: {str(e)}")
             return False
     
-    def send_password_reset_email(self, to_email, username, reset_token):
+    def send_password_reset_email(self, to_email, username, reset_token, lang='lv'):
         """
         Send password reset email with reset link.
         
@@ -93,13 +94,21 @@ class EmailService:
             to_email: User's email address
             username: User's username for personalization
             reset_token: The password reset token
+            lang: User's preferred language code
         
         Returns:
             bool: True if sent successfully
         """
         reset_link = f"{self.frontend_url}/reset-password?token={reset_token}"
         
-        subject = "Reset Your Password - Marketplace"
+        subject = get_text('email.password_reset.subject', lang)
+        greeting = get_text('email.password_reset.greeting', lang, username=username)
+        body_text = get_text('email.password_reset.body', lang)
+        button_text = get_text('email.password_reset.button', lang)
+        expiry_text = get_text('email.password_reset.expiry', lang)
+        ignore_text = get_text('email.password_reset.ignore', lang)
+        fallback_text = get_text('email.password_reset.fallback', lang)
+        footer_text = get_text('email.password_reset.footer', lang)
         
         # Debug info for dev mode
         debug_info = f"PASSWORD RESET LINK:\n{reset_link}"
@@ -113,49 +122,37 @@ class EmailService:
         </head>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #3B82F6, #2563EB); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                <h1 style="color: white; margin: 0; font-size: 24px;">Password Reset</h1>
+                <h1 style="color: white; margin: 0; font-size: 24px;">{button_text}</h1>
             </div>
             
             <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
-                <p style="font-size: 16px;">Hi <strong>{username}</strong>,</p>
+                <p style="font-size: 16px;">{greeting}</p>
                 
-                <p style="font-size: 16px;">We received a request to reset your password. Click the button below to create a new password:</p>
+                <p style="font-size: 16px;">{body_text}</p>
                 
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="{reset_link}" style="background: #3B82F6; color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; display: inline-block;">Reset Password</a>
+                    <a href="{reset_link}" style="background: #3B82F6; color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; display: inline-block;">{button_text}</a>
                 </div>
                 
-                <p style="font-size: 14px; color: #6b7280;">This link will expire in <strong>1 hour</strong> for security reasons.</p>
+                <p style="font-size: 14px; color: #6b7280;">{expiry_text}</p>
                 
-                <p style="font-size: 14px; color: #6b7280;">If you didn't request this password reset, you can safely ignore this email. Your password will remain unchanged.</p>
+                <p style="font-size: 14px; color: #6b7280;">{ignore_text}</p>
                 
                 <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 25px 0;">
                 
-                <p style="font-size: 12px; color: #9ca3af;">If the button doesn't work, copy and paste this link into your browser:</p>
+                <p style="font-size: 12px; color: #9ca3af;">{fallback_text}</p>
                 <p style="font-size: 12px; color: #3B82F6; word-break: break-all;">{reset_link}</p>
             </div>
             
             <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
-                <p>&copy; 2026 Marketplace. All rights reserved.</p>
+                <p>{footer_text}</p>
             </div>
         </body>
         </html>
         """
         
-        text_content = f"""
-        Hi {username},
-        
-        We received a request to reset your password.
-        
-        Click this link to reset your password:
-        {reset_link}
-        
-        This link will expire in 1 hour.
-        
-        If you didn't request this, you can safely ignore this email.
-        
-        - Marketplace Team
-        """
+        text_content = get_text('email.password_reset.text_body', lang,
+                                username=username, reset_link=reset_link)
         
         return self.send_email(to_email, subject, html_content, text_content, debug_info)
 
