@@ -179,7 +179,7 @@ try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     conn.autocommit = True
     cur = conn.cursor()
-    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(10) DEFAULT 'lv'")
+    cur.execute(\"ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(10) DEFAULT 'lv'\")
     print('[HOTFIX] preferred_language column ready')
     conn.close()
 except Exception as e:
