@@ -150,7 +150,7 @@ def notify_new_message(recipient_id: int, sender_name: str, message_preview: str
     logger.info(f'[PUSH] notify_new_message called - recipient: {recipient_id}, sender: {sender_name}')
     return send_push_notification(
         user_id=recipient_id,
-        title=f'💬 {sender_name}',
+        title=f'\U0001f4ac {sender_name}',
         body=message_preview[:100] + ('...' if len(message_preview) > 100 else ''),
         url=f'/messages/{conversation_id}',
         tag=f'message-{conversation_id}'  # Replace previous messages from same conversation
@@ -165,7 +165,7 @@ def notify_application_received(task_owner_id: int, applicant_name: str,
     logger.info(f'[PUSH] notify_application_received called - owner: {task_owner_id}')
     return send_push_notification(
         user_id=task_owner_id,
-        title='👋 New Application!',
+        title='\U0001f44b New Application!',
         body=f'{applicant_name} applied for "{task_title}"',
         url=f'/tasks/{task_id}',
         tag=f'application-{task_id}'
@@ -179,7 +179,7 @@ def notify_application_accepted(applicant_id: int, task_title: str, task_id: int
     logger.info(f'[PUSH] notify_application_accepted called - applicant: {applicant_id}')
     return send_push_notification(
         user_id=applicant_id,
-        title='🎉 Application Accepted!',
+        title='\U0001f389 Application Accepted!',
         body=f'You got the job! "{task_title}"',
         url=f'/tasks/{task_id}',
         tag=f'accepted-{task_id}'
@@ -208,7 +208,7 @@ def notify_task_marked_done(task_owner_id: int, worker_name: str,
     logger.info(f'[PUSH] notify_task_marked_done called - owner: {task_owner_id}')
     return send_push_notification(
         user_id=task_owner_id,
-        title='✅ Task Completed',
+        title='\u2705 Task Completed',
         body=f'{worker_name} finished "{task_title}". Please review.',
         url=f'/tasks/{task_id}',
         tag=f'done-{task_id}'
@@ -222,7 +222,7 @@ def notify_task_confirmed(worker_id: int, task_title: str, task_id: int):
     logger.info(f'[PUSH] notify_task_confirmed called - worker: {worker_id}')
     return send_push_notification(
         user_id=worker_id,
-        title='🌟 Great job!',
+        title='\U0001f31f Great job!',
         body=f'"{task_title}" has been confirmed complete.',
         url=f'/tasks/{task_id}',
         tag=f'confirmed-{task_id}'
@@ -236,7 +236,7 @@ def notify_task_disputed(user_id: int, task_title: str, task_id: int):
     logger.info(f'[PUSH] notify_task_disputed called - user: {user_id}')
     return send_push_notification(
         user_id=user_id,
-        title='⚠️ Task Disputed',
+        title='\u26a0\ufe0f Task Disputed',
         body=f'A dispute has been raised for "{task_title}". Please check.',
         url=f'/tasks/{task_id}',
         tag=f'disputed-{task_id}'
@@ -250,7 +250,7 @@ def notify_task_cancelled(user_id: int, task_title: str, task_id: int):
     logger.info(f'[PUSH] notify_task_cancelled called - user: {user_id}')
     return send_push_notification(
         user_id=user_id,
-        title='❌ Task Cancelled',
+        title='\u274c Task Cancelled',
         body=f'The task "{task_title}" has been cancelled.',
         url=f'/tasks/{task_id}',
         tag=f'cancelled-{task_id}'
@@ -263,7 +263,7 @@ def notify_new_review(user_id: int, reviewer_name: str, task_title: str,
     Send push notification when someone leaves a review for you.
     """
     logger.info(f'[PUSH] notify_new_review called - user: {user_id}')
-    stars = '⭐' * min(rating, 5)
+    stars = '\u2b50' * min(rating, 5)
     return send_push_notification(
         user_id=user_id,
         title=f'{stars} New Review!',
@@ -276,13 +276,28 @@ def notify_new_review(user_id: int, reviewer_name: str, task_title: str,
 def notify_new_job_nearby(user_id: int, task_title: str, task_id: int, 
                           distance_km: float):
     """
-    Send push notification for new job posted nearby (optional feature).
+    Send push notification for new job posted nearby.
     """
     logger.info(f'[PUSH] notify_new_job_nearby called - user: {user_id}')
     return send_push_notification(
         user_id=user_id,
-        title='💼 New Job Nearby!',
+        title='\U0001f4bc New Job Nearby!',
         body=f'"{task_title}" - {distance_km:.1f}km away',
         url=f'/tasks/{task_id}',
         tag='new-job-nearby'
+    )
+
+
+def notify_review_reminder(user_id: int, other_party_name: str, 
+                           task_title: str, task_id: int):
+    """
+    Send push notification reminding user to leave a review after task completion.
+    """
+    logger.info(f'[PUSH] notify_review_reminder called - user: {user_id}')
+    return send_push_notification(
+        user_id=user_id,
+        title='\u270d\ufe0f Leave a Review',
+        body=f'How was working with {other_party_name} on "{task_title}"?',
+        url=f'/tasks/{task_id}',
+        tag=f'review-reminder-{task_id}'
     )
