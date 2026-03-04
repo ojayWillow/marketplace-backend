@@ -14,6 +14,7 @@ import logging
 from app import db
 from app.models import User
 from app.routes.tasks.helpers import distance
+from app.utils import send_push_safe
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ def send_job_alerts_for_task(task) -> int:
         Number of notifications created
     """
     from app.routes.notifications import notify_new_task_nearby
+    from app.services.push_notifications import notify_new_job_nearby
     
     # Task must have coordinates
     if task.latitude is None or task.longitude is None:
@@ -78,7 +80,7 @@ def send_job_alerts_for_task(task) -> int:
         if task.budget:
             budget_display = f'\u20ac{task.budget}'
         
-        # Create notification
+        # Create in-app notification
         try:
             notify_new_task_nearby(
                 user_id=user.id,
@@ -93,6 +95,15 @@ def send_job_alerts_for_task(task) -> int:
         except Exception as e:
             logger.error(f'Error creating job alert for user {user.id}: {e}')
             continue
+        
+        # Send push notification
+        send_push_safe(
+            notify_new_job_nearby,
+            user_id=user.id,
+            task_title=task.title,
+            task_id=task.id,
+            distance_km=round(dist, 1)
+        )
     
     if notified > 0:
         try:

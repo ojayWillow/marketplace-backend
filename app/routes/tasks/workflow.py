@@ -7,7 +7,8 @@ from app.services.push_notifications import (
     notify_task_marked_done,
     notify_task_confirmed,
     notify_task_disputed as push_notify_disputed,
-    notify_task_cancelled as push_notify_cancelled
+    notify_task_cancelled as push_notify_cancelled,
+    notify_review_reminder as push_notify_review_reminder
 )
 from app.utils import token_required, get_display_name, send_push_safe
 from app.routes.tasks import tasks_bp
@@ -120,6 +121,30 @@ def confirm_task_completion(current_user_id, task_id):
         except Exception as notify_error:
             db.session.rollback()
             print(f"In-app notification skipped (non-critical): {notify_error}")
+        
+        # Push notifications for review reminders
+        creator = User.query.get(current_user_id)
+        creator_name = get_display_name(creator)
+        worker = User.query.get(worker_id)
+        worker_name = get_display_name(worker)
+        
+        # Review reminder push to worker (to review the creator)
+        send_push_safe(
+            push_notify_review_reminder,
+            user_id=worker_id,
+            other_party_name=creator_name,
+            task_title=task_title,
+            task_id=task_id
+        )
+        
+        # Review reminder push to creator (to review the worker)
+        send_push_safe(
+            push_notify_review_reminder,
+            user_id=current_user_id,
+            other_party_name=worker_name,
+            task_title=task_title,
+            task_id=task_id
+        )
         
         return jsonify({
             'message': 'Task completed! Both parties can now leave reviews.',
