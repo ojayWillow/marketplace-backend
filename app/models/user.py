@@ -43,6 +43,9 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)  # Track user activity
     
+    # Language preference for i18n (push notifications, emails)
+    preferred_language = db.Column(db.String(5), default='lv', nullable=False)
+    
     # Onboarding tracking
     onboarding_completed = db.Column(db.Boolean, default=False, nullable=False)
     username_changes_remaining = db.Column(db.Integer, default=1, nullable=False)
@@ -251,6 +254,7 @@ class User(db.Model):
             'review_count': self.review_count,
             'onboarding_completed': self.onboarding_completed,
             'username_changes_remaining': self.username_changes_remaining,
+            'preferred_language': self.preferred_language,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
