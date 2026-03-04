@@ -1,8 +1,8 @@
-"""Payment routes for Revolut integration.
+"""Payment routes for Stripe integration.
 
 Endpoints:
-    POST /api/payments/create-order  — Create a Revolut order for a paid feature
-    POST /api/payments/webhook       — Receive Revolut webhook (ORDER_COMPLETED)
+    POST /api/payments/create-order  — Create a Stripe Checkout Session for a paid feature
+    POST /api/payments/webhook       — Receive Stripe webhook (checkout.session.completed)
     GET  /api/payments/status/<id>   — Poll payment status after redirect
 """
 
@@ -13,7 +13,7 @@ import logging
 from app import db
 from app.models import Payment, TaskRequest, Offering
 from app.utils.auth import token_required
-from app.services import revolut
+from app.services import stripe_service
 
 logger = logging.getLogger(__name__)
 
@@ -31,32 +31,32 @@ FEATURE_DURATIONS = {
 @payments_bp.route('/create-order', methods=['POST'])
 @token_required
 def create_order(current_user_id):
-    """Create a Revolut payment order for a paid feature.
-    
+    """Create a Stripe Checkout Session for a paid feature.
+
     Body:
         type: str — 'urgent_task', 'promote_task', 'promote_offering', 'boost_offering'
         entity_id: int — task_request.id or offering.id (also accepts 'target_id')
-    
+
     Returns:
         { checkout_url: str, order_id: str }
     """
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body is required'}), 400
-    
+
     payment_type = data.get('type')
     entity_id = data.get('entity_id') or data.get('target_id')
-    
+
     # Validate payment type
     if not Payment.is_valid_type(payment_type):
         return jsonify({'error': f'Invalid payment type. Must be one of: {list(Payment.PRICES.keys())}'}), 400
-    
+
     if not entity_id:
         return jsonify({'error': 'entity_id is required'}), 400
-    
+
     # Validate entity exists and user owns it
     entity_model = Payment.ENTITY_TYPES[payment_type]
-    
+
     if entity_model == 'task_request':
         entity = TaskRequest.query.get(entity_id)
         if not entity:
@@ -69,7 +69,7 @@ def create_order(current_user_id):
             return jsonify({'error': 'Offering not found'}), 404
         if entity.creator_id != current_user_id:
             return jsonify({'error': 'You can only boost your own offerings'}), 403
-    
+
     # Check if feature is already active (don't allow duplicate payments)
     if payment_type == 'urgent_task':
         if entity.is_urgent and hasattr(entity, 'urgent_expires_at') and entity.urgent_expires_at:
@@ -83,10 +83,10 @@ def create_order(current_user_id):
     elif payment_type == 'boost_offering':
         if entity.is_boost_active():
             return jsonify({'error': 'This offering is already boosted'}), 409
-    
+
     # Get price
     amount_cents = Payment.get_price(payment_type)
-    
+
     # Build description for checkout page
     descriptions = {
         'urgent_task': f'Urgent Task: {entity.title}',
@@ -95,26 +95,26 @@ def create_order(current_user_id):
         'boost_offering': f'Map Boost: {entity.title}',
     }
     description = descriptions[payment_type]
-    
-    # Create Revolut order
-    order = revolut.create_order(
+
+    # Create Stripe Checkout Session
+    session = stripe_service.create_checkout_session(
         amount_cents=amount_cents,
-        currency='EUR',
+        currency='eur',
         description=description,
-        order_metadata={
+        metadata={
             'type': payment_type,
             'entity_id': str(entity_id),
             'user_id': str(current_user_id),
         }
     )
-    
-    if not order:
-        return jsonify({'error': 'Failed to create payment order. Please try again.'}), 502
-    
+
+    if not session:
+        return jsonify({'error': 'Failed to create payment session. Please try again.'}), 502
+
     # Save payment record
     payment = Payment(
         user_id=current_user_id,
-        revolut_order_id=order['order_id'],
+        stripe_session_id=session['session_id'],
         type=payment_type,
         entity_id=entity_id,
         amount=amount_cents,
@@ -123,61 +123,61 @@ def create_order(current_user_id):
     )
     db.session.add(payment)
     db.session.commit()
-    
-    logger.info(f"Payment order created: {payment.id} ({payment_type} for entity {entity_id})")
-    
+
+    logger.info(f"Payment session created: {payment.id} ({payment_type} for entity {entity_id})")
+
+    # Return order_id for backwards compatibility with frontend
     return jsonify({
-        'checkout_url': order['checkout_url'],
-        'order_id': order['order_id'],
+        'checkout_url': session['checkout_url'],
+        'order_id': session['session_id'],
     }), 201
 
 
 @payments_bp.route('/webhook', methods=['POST'])
-def revolut_webhook():
-    """Handle Revolut webhook events.
-    
-    Revolut sends ORDER_COMPLETED when payment is successful.
+def stripe_webhook():
+    """Handle Stripe webhook events.
+
+    Stripe sends checkout.session.completed when payment is successful.
     This endpoint verifies the signature and activates the paid feature.
     """
     # Verify webhook signature
-    signature = request.headers.get('Revolut-Signature', '')
+    signature = request.headers.get('Stripe-Signature', '')
     payload_body = request.get_data()
-    
-    if not revolut.verify_webhook_signature(payload_body, signature):
+
+    event = stripe_service.verify_webhook_signature(payload_body, signature)
+
+    if not event:
         logger.warning('Webhook signature verification failed')
         return jsonify({'error': 'Invalid signature'}), 401
-    
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Empty payload'}), 400
-    
-    event = data.get('event')
-    order_data = data.get('order', {})
-    order_id = order_data.get('id') or data.get('order_id')
-    
-    logger.info(f"Webhook received: event={event}, order_id={order_id}")
-    
-    if event != 'ORDER_COMPLETED':
+
+    event_type = event.get('type') if isinstance(event, dict) else event['type']
+    logger.info(f"Webhook received: event_type={event_type}")
+
+    if event_type != 'checkout.session.completed':
         # Acknowledge non-completion events without processing
         return jsonify({'status': 'ignored'}), 200
-    
-    if not order_id:
-        logger.error('Webhook ORDER_COMPLETED but no order_id')
-        return jsonify({'error': 'Missing order_id'}), 400
-    
+
+    # Extract session data
+    session_data = event.get('data', {}).get('object', {}) if isinstance(event, dict) else event['data']['object']
+    session_id = session_data.get('id')
+
+    if not session_id:
+        logger.error('Webhook checkout.session.completed but no session id')
+        return jsonify({'error': 'Missing session_id'}), 400
+
     # Find payment record
-    payment = Payment.query.filter_by(revolut_order_id=order_id).first()
+    payment = Payment.query.filter_by(stripe_session_id=session_id).first()
     if not payment:
-        logger.error(f'Payment not found for order_id: {order_id}')
+        logger.error(f'Payment not found for session_id: {session_id}')
         return jsonify({'error': 'Payment not found'}), 404
-    
+
     if payment.status == 'completed':
         # Idempotent — already processed
         return jsonify({'status': 'already_processed'}), 200
-    
+
     # Activate the feature
     success = _activate_feature(payment)
-    
+
     if success:
         payment.status = 'completed'
         payment.completed_at = datetime.utcnow()
@@ -191,26 +191,26 @@ def revolut_webhook():
         return jsonify({'error': 'Feature activation failed'}), 500
 
 
-@payments_bp.route('/status/<order_id>', methods=['GET'])
+@payments_bp.route('/status/<session_id>', methods=['GET'])
 @token_required
-def get_payment_status(current_user_id, order_id):
-    """Get the status of a payment order.
-    
-    The frontend polls this endpoint after redirecting back from Revolut checkout.
+def get_payment_status(current_user_id, session_id):
+    """Get the status of a payment session.
+
+    The frontend polls this endpoint after redirecting back from Stripe Checkout.
     """
-    payment = Payment.query.filter_by(revolut_order_id=order_id).first()
-    
+    payment = Payment.query.filter_by(stripe_session_id=session_id).first()
+
     if not payment:
         return jsonify({'error': 'Payment not found'}), 404
-    
+
     # Only allow the owner to check their payment status
     if payment.user_id != current_user_id:
         return jsonify({'error': 'Unauthorized'}), 403
-    
-    # If still pending, optionally check with Revolut directly
+
+    # If still pending, check with Stripe directly
     if payment.status == 'pending':
-        revolut_order = revolut.get_order(order_id)
-        if revolut_order and revolut_order.get('state') == 'completed':
+        stripe_session = stripe_service.get_session(session_id)
+        if stripe_session and stripe_session.get('payment_status') == 'paid':
             # Webhook may not have arrived yet — activate now
             success = _activate_feature(payment)
             if success:
@@ -218,7 +218,7 @@ def get_payment_status(current_user_id, order_id):
                 payment.completed_at = datetime.utcnow()
                 db.session.commit()
                 logger.info(f"Payment {payment.id} completed via polling")
-    
+
     return jsonify({
         'status': payment.status,
         'type': payment.type,
@@ -229,10 +229,10 @@ def get_payment_status(current_user_id, order_id):
 
 def _activate_feature(payment):
     """Activate the paid feature for a payment.
-    
+
     Sets the appropriate flags and expiration on the entity.
     Uses per-type durations from FEATURE_DURATIONS.
-    
+
     Returns:
         True on success, False on failure
     """
@@ -241,9 +241,9 @@ def _activate_feature(payment):
     if not duration:
         logger.error(f'No duration defined for payment type: {payment.type}')
         return False
-    
+
     expires_at = now + duration
-    
+
     try:
         if payment.type == 'urgent_task':
             task = TaskRequest.query.get(payment.entity_id)
@@ -252,7 +252,7 @@ def _activate_feature(payment):
                 return False
             task.is_urgent = True
             task.urgent_expires_at = expires_at
-            
+
         elif payment.type == 'promote_task':
             task = TaskRequest.query.get(payment.entity_id)
             if not task:
@@ -260,7 +260,7 @@ def _activate_feature(payment):
                 return False
             task.is_promoted = True
             task.promoted_expires_at = expires_at
-            
+
         elif payment.type == 'promote_offering':
             offering = Offering.query.get(payment.entity_id)
             if not offering:
@@ -268,7 +268,7 @@ def _activate_feature(payment):
                 return False
             offering.is_promoted = True
             offering.promoted_expires_at = expires_at
-            
+
         elif payment.type == 'boost_offering':
             offering = Offering.query.get(payment.entity_id)
             if not offering:
@@ -276,15 +276,15 @@ def _activate_feature(payment):
                 return False
             offering.is_boosted = True
             offering.boost_expires_at = expires_at
-            
+
         else:
             logger.error(f'Unknown payment type: {payment.type}')
             return False
-        
+
         db.session.flush()
         logger.info(f'Feature {payment.type} activated for entity {payment.entity_id}, expires at {expires_at}')
         return True
-        
+
     except Exception as e:
         logger.error(f'Feature activation error: {e}')
         db.session.rollback()
