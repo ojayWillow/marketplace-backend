@@ -1,0 +1,61 @@
+{
+  "push": {
+    "new_message": {
+      "title": "💬 {name}",
+      "body": "{preview}"
+    },
+    "application_received": {
+      "title": "👋 New Application!",
+      "body": "{name} applied for \"{title}\""
+    },
+    "application_accepted": {
+      "title": "🎉 Application Accepted!",
+      "body": "You got the job! \"{title}\""
+    },
+    "application_rejected": {
+      "title": "Application Update",
+      "body": "Your application for \"{title}\" was not selected."
+    },
+    "task_marked_done": {
+      "title": "✅ Task Completed",
+      "body": "{name} finished \"{title}\". Please review."
+    },
+    "task_confirmed": {
+      "title": "🌟 Great job!",
+      "body": "\"{title}\" has been confirmed complete."
+    },
+    "task_disputed": {
+      "title": "⚠️ Task Disputed",
+      "body": "A dispute has been raised for \"{title}\". Please check."
+    },
+    "task_cancelled": {
+      "title": "❌ Task Cancelled",
+      "body": "The task \"{title}\" has been cancelled."
+    },
+    "new_review": {
+      "title": "{stars} New Review!",
+      "body": "{name} left a review for \"{title}\"."
+    },
+    "new_job_nearby": {
+      "title": "💼 New Job Nearby!",
+      "body": "\"{title}\" — {distance}km away"
+    },
+    "review_reminder": {
+      "title": "✍️ Leave a Review",
+      "body": "How was working with {name} on \"{title}\"?"
+    }
+  },
+  "email": {
+    "password_reset": {
+      "subject": "Reset Your Password — Marketplace",
+      "greeting": "Hi {username},",
+      "body": "We received a request to reset your password. Click the button below to create a new password:",
+      "button": "Reset Password",
+      "expiry": "This link will expire in 1 hour for security reasons.",
+      "ignore": "If you didn't request this password reset, you can safely ignore this email. Your password will remain unchanged.",
+      "fallback": "If the button doesn't work, copy and paste this link into your browser:",
+      "footer": "© 2026 Marketplace. All rights reserved.",
+      "text_body": "Hi {username},\n\nWe received a request to reset your password.\n\nClick this link to reset your password:\n{reset_link}\n\nThis link will expire in 1 hour.\n\nIf you didn't request this, you can safely ignore this email.\n\n— Marketplace Team"
+    }
+  }
+}

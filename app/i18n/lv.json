@@ -1,0 +1,61 @@
+{
+  "push": {
+    "new_message": {
+      "title": "💬 {name}",
+      "body": "{preview}"
+    },
+    "application_received": {
+      "title": "👋 Jauns pieteikums!",
+      "body": "{name} pieteicās uz \"{title}\""
+    },
+    "application_accepted": {
+      "title": "🎉 Pieteikums apstiprināts!",
+      "body": "Tu ieguvi darbu! \"{title}\""
+    },
+    "application_rejected": {
+      "title": "Pieteikuma atjauninājums",
+      "body": "Tavs pieteikums uz \"{title}\" netika izvēlēts."
+    },
+    "task_marked_done": {
+      "title": "✅ Uzdevums pabeigts",
+      "body": "{name} pabeidza \"{title}\". Lūdzu, pārskati."
+    },
+    "task_confirmed": {
+      "title": "🌟 Lielisks darbs!",
+      "body": "\"{title}\" ir apstiprināts kā pabeigts."
+    },
+    "task_disputed": {
+      "title": "⚠️ Uzdevums apstrīdēts",
+      "body": "Ir iesniegta sūdzība par \"{title}\". Lūdzu, pārbaudi."
+    },
+    "task_cancelled": {
+      "title": "❌ Uzdevums atcelts",
+      "body": "Uzdevums \"{title}\" ir atcelts."
+    },
+    "new_review": {
+      "title": "{stars} Jauna atsauksme!",
+      "body": "{name} atstāja atsauksmi par \"{title}\"."
+    },
+    "new_job_nearby": {
+      "title": "💼 Jauns darbs tuvūmā!",
+      "body": "\"{title}\" — {distance} km attālumā"
+    },
+    "review_reminder": {
+      "title": "✍️ Atstāj atsauksmi",
+      "body": "Kā bija sadarbība ar {name} uzdevumā \"{title}\"?"
+    }
+  },
+  "email": {
+    "password_reset": {
+      "subject": "Paroles atiestatīšana — Marketplace",
+      "greeting": "Sveiki, {username}!",
+      "body": "Mēs saņēmām pieprasījumu atiestatīt jūsu paroli. Noklikšķiniet uz pogas zemāk, lai izveidotu jaunu paroli:",
+      "button": "Atiestatīt paroli",
+      "expiry": "Šī saite derīga 1 stundu drošības nolūkos.",
+      "ignore": "Ja jūs nepieprasījāt paroles atiestatīšanu, varat droši ignorēt šo e-pastu. Jūsu parole paliks nemainīga.",
+      "fallback": "Ja poga nedarbojas, nokopējiet un ielīmējiet šo saiti savā pārlūkprogrammā:",
+      "footer": "© 2026 Marketplace. Visas tiesības aizsargātas.",
+      "text_body": "Sveiki, {username}!\n\nMēs saņēmām pieprasījumu atiestatīt jūsu paroli.\n\nNoklikšķiniet uz šīs saites, lai atiestatītu paroli:\n{reset_link}\n\nŠī saite derīga 1 stundu.\n\nJa jūs to nepieprasījāt, varat droši ignorēt šo e-pastu.\n\n— Marketplace komanda"
+    }
+  }
+}
