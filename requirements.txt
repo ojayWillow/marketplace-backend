@@ -19,3 +19,4 @@ requests>=2.31.0
 resend==0.8.0
 supabase>=2.0.0
 stripe>=7.0.0
+Flask-Limiter==3.5.1
