@@ -3,6 +3,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_socketio import SocketIO
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 from dotenv import load_dotenv
 
@@ -11,6 +13,11 @@ load_dotenv()
 db = SQLAlchemy()
 migrate = Migrate()
 socketio = SocketIO()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per minute"],
+    storage_uri="memory://",
+)
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -36,6 +43,7 @@ def create_app(config_name=None):
     if config_name == 'testing':
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['TESTING'] = True
+        app.config['RATELIMIT_ENABLED'] = False  # Disable rate limiting in tests
     elif database_url:
         # Production/Render - use the environment database URL
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
@@ -48,6 +56,15 @@ def create_app(config_name=None):
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
+    limiter.init_app(app)
+    
+    # Custom 429 error handler for rate limiting
+    @app.errorhandler(429)
+    def ratelimit_handler(e):
+        return jsonify({
+            'error': 'Rate limit exceeded',
+            'message': str(e.description),
+        }), 429
     
     # Allowed origins for CORS
     allowed_origins = [
@@ -216,9 +233,10 @@ def create_app(config_name=None):
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
     
     # Middleware to update user's last_seen on authenticated requests
+    # Throttled: only writes to DB if last_seen is older than 5 minutes
     @app.before_request
     def update_last_seen():
-        """Update user's last_seen timestamp on every authenticated request."""
+        """Update user's last_seen timestamp (throttled to every 5 minutes)."""
         # Skip for OPTIONS requests (CORS preflight)
         if request.method == 'OPTIONS':
             return
@@ -240,10 +258,14 @@ def create_app(config_name=None):
                 return
             
             from app.models import User
+            from datetime import datetime, timedelta
             user = User.query.get(user_id)
             if user:
-                user.update_last_seen()
-                db.session.commit()
+                # Only update if last_seen is older than 5 minutes (reduces DB writes)
+                now = datetime.utcnow()
+                if not user.last_seen or (now - user.last_seen) > timedelta(minutes=5):
+                    user.last_seen = now
+                    db.session.commit()
         except Exception:
             # Silently ignore errors - don't break the request
             pass

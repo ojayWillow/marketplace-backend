@@ -1,7 +1,7 @@
 """Authentication routes for user registration and login."""
 
 from flask import Blueprint, request, jsonify, current_app
-from app import db
+from app import db, limiter
 from app.models import User, Review, Listing, Offering, TaskRequest, TaskApplication
 from app.utils import token_required
 from app.i18n import get_supported_languages
@@ -160,6 +160,7 @@ def _build_session_response(user, message, supabase_session=None, **extra):
 # ============================================================================
 
 @auth_bp.route('/phone/verify', methods=['POST'])
+@limiter.limit("5 per minute")
 def phone_verify():
     """Firebase phone verification endpoint.
     
@@ -263,6 +264,7 @@ def phone_verify():
 
 
 @auth_bp.route('/phone/link', methods=['POST'])
+@limiter.limit("5 per minute")
 @token_required
 def phone_link(current_user_id):
     """Link a verified phone number to existing user account via Firebase.
@@ -347,6 +349,7 @@ def phone_link(current_user_id):
 
 
 @auth_bp.route('/complete-registration', methods=['PUT'])
+@limiter.limit("5 per minute")
 @token_required
 def complete_registration(current_user_id):
     """Complete onboarding for new users.
@@ -492,6 +495,7 @@ def complete_registration(current_user_id):
 
 
 @auth_bp.route('/check-username/<username>', methods=['GET'])
+@limiter.limit("20 per minute")
 def check_username(username):
     """Check if a username is available.
     
