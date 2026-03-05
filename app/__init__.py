@@ -3,7 +3,10 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_socketio import SocketIO
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,6 +14,11 @@ load_dotenv()
 db = SQLAlchemy()
 migrate = Migrate()
 socketio = SocketIO()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["60 per minute"],
+    storage_uri="memory://",
+)
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -48,6 +56,12 @@ def create_app(config_name=None):
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
+    
+    # Initialize rate limiter
+    # Disable rate limiting during tests
+    if config_name == 'testing':
+        app.config['RATELIMIT_ENABLED'] = False
+    limiter.init_app(app)
     
     # Allowed origins for CORS
     allowed_origins = [
@@ -216,9 +230,13 @@ def create_app(config_name=None):
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
     
     # Middleware to update user's last_seen on authenticated requests
+    # Throttled: only updates if last_seen is older than 5 minutes
+    LAST_SEEN_THROTTLE = timedelta(minutes=5)
+    
     @app.before_request
     def update_last_seen():
-        """Update user's last_seen timestamp on every authenticated request."""
+        """Update user's last_seen timestamp on every authenticated request.
+        Throttled to only write to DB if last update was >5 minutes ago."""
         # Skip for OPTIONS requests (CORS preflight)
         if request.method == 'OPTIONS':
             return
@@ -242,8 +260,11 @@ def create_app(config_name=None):
             from app.models import User
             user = User.query.get(user_id)
             if user:
-                user.update_last_seen()
-                db.session.commit()
+                now = datetime.now(timezone.utc)
+                # Only update if last_seen is older than 5 minutes
+                if user.last_seen is None or (now - user.last_seen.replace(tzinfo=timezone.utc)) > LAST_SEEN_THROTTLE:
+                    user.update_last_seen()
+                    db.session.commit()
         except Exception:
             # Silently ignore errors - don't break the request
             pass
