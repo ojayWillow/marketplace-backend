@@ -11,11 +11,36 @@ Note: These use the SERVICE_KEY (admin access). Never expose to frontend.
 import logging
 import os
 import secrets
+import threading
+import time
 from typing import Optional, Tuple
 import requests as http_requests
 from app.services.supabase_client import get_supabase_client, get_supabase_anon_client
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Per-user session cache — prevents parallel sign_in_with_password calls that
+# exhaust Supabase refresh token rotation and cause "Already Used" errors.
+# ---------------------------------------------------------------------------
+_session_cache: dict = {}          # user_key -> {"session": dict, "expires_at": float}
+_session_cache_lock = threading.Lock()
+_SESSION_BUFFER_SECS = 120         # Refresh early if <2 min left
+
+
+def _cached_session(cache_key: str):
+    with _session_cache_lock:
+        entry = _session_cache.get(cache_key)
+        if entry and entry["expires_at"] > time.time() + _SESSION_BUFFER_SECS:
+            logger.debug(f"Session cache HIT for key {cache_key}")
+            return entry["session"]
+    return None
+
+
+def _store_session(cache_key: str, session: dict):
+    expires_at = session.get("expires_at") or (time.time() + session.get("expires_in", 3600))
+    with _session_cache_lock:
+        _session_cache[cache_key] = {"session": session, "expires_at": float(expires_at)}
 
 
 def create_supabase_user(
@@ -27,6 +52,9 @@ def create_supabase_user(
     user_metadata: Optional[dict] = None,
 ) -> Tuple:
     """Create a new user in Supabase Auth.
+
+    If the phone or email is already registered, returns the existing Supabase
+    user instead of raising — avoids 422 loops when the same user logs in again.
 
     Args:
         email: User email address
@@ -41,7 +69,7 @@ def create_supabase_user(
         password_used is needed for subsequent sign_in_with_password
 
     Raises:
-        Exception if creation fails
+        Exception if creation fails for an unexpected reason
     """
     client = get_supabase_client()
     if not client:
@@ -51,8 +79,6 @@ def create_supabase_user(
         password = secrets.token_urlsafe(32)
 
     attrs = {'password': password}
-    # Always include email — Supabase sign_in_with_password works reliably
-    # with email but is flaky with phone. Include placeholder emails too.
     if email:
         attrs['email'] = email
         attrs['email_confirm'] = email_confirm
@@ -62,9 +88,26 @@ def create_supabase_user(
     if user_metadata:
         attrs['user_metadata'] = user_metadata
 
-    response = client.auth.admin.create_user(attrs)
-    logger.info(f'Supabase user created: {response.user.id}')
-    return response.user, password
+    try:
+        response = client.auth.admin.create_user(attrs)
+        logger.info(f'Supabase user created: {response.user.id}')
+        return response.user, password
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if 'already registered' in error_msg or 'already been registered' in error_msg:
+            logger.info('Supabase user already exists — looking up by phone/email')
+            # Look up existing user so caller can link it
+            existing = None
+            if phone:
+                existing = get_supabase_user_by_phone(phone)
+            if not existing and email and not email.endswith('.kolab.local'):
+                existing = get_supabase_user_by_email(email)
+            if existing:
+                # Return None for password — caller must use stored password or reset it
+                return existing, None
+            logger.error('Could not find existing Supabase user after duplicate error')
+        raise
 
 
 def generate_supabase_session(
@@ -75,11 +118,8 @@ def generate_supabase_session(
 ) -> Optional[dict]:
     """Generate a Supabase session (access_token + refresh_token) for a user.
 
-    Uses sign_in_with_password via the anon client. If no password is known,
-    sets a new random password via admin API first, then signs in.
-
-    IMPORTANT: Always uses email for sign-in (even placeholder .kolab.local
-    emails) because Supabase sign_in_with_password with phone is unreliable.
+    Uses a per-user in-memory cache to prevent parallel sign_in_with_password
+    calls that cause "Invalid Refresh Token: Already Used" errors.
 
     Args:
         email: User email (used for sign-in — preferred)
@@ -91,6 +131,14 @@ def generate_supabase_session(
         Dict with access_token, refresh_token, expires_in, expires_at
         or None if session generation fails
     """
+    # Build a stable cache key from whatever identifier we have
+    cache_key = supabase_user_id or email or phone or 'unknown'
+
+    # Return cached session if still fresh
+    cached = _cached_session(cache_key)
+    if cached:
+        return cached
+
     anon_client = get_supabase_anon_client()
     if not anon_client:
         logger.warning('Anon client not available — cannot generate Supabase session')
@@ -109,7 +157,6 @@ def generate_supabase_session(
 
         password = secrets.token_urlsafe(32)
         try:
-            # Also update email on the Supabase user if provided
             update_attrs = {'password': password}
             if email:
                 update_attrs['email'] = email
@@ -124,16 +171,12 @@ def generate_supabase_session(
             logger.error(f'Failed to reset password for session generation: {e}')
             return None
 
-    # Sign in to get a real session
-    # ALWAYS prefer email (even placeholder .kolab.local) over phone.
-    # Supabase sign_in_with_password with phone is unreliable/broken.
     try:
         credentials = {'password': password}
 
         if email:
             credentials['email'] = email
         elif phone:
-            # Last resort — phone sign-in is unreliable but try anyway
             credentials['phone'] = phone
         else:
             logger.error('No email or phone available for sign-in')
@@ -143,12 +186,14 @@ def generate_supabase_session(
 
         if response.session:
             logger.info('Supabase session generated successfully')
-            return {
+            session_data = {
                 'access_token': response.session.access_token,
                 'refresh_token': response.session.refresh_token,
                 'expires_in': response.session.expires_in,
                 'expires_at': response.session.expires_at,
             }
+            _store_session(cache_key, session_data)
+            return session_data
         else:
             logger.error('sign_in_with_password returned no session')
             return None
@@ -195,7 +240,6 @@ def _gotrue_admin_list_users_filtered(filter_value: str) -> Optional[list]:
         )
         if resp.status_code == 200:
             data = resp.json()
-            # GoTrue returns {"users": [...]} or just a list
             if isinstance(data, dict):
                 return data.get('users', [])
             if isinstance(data, list):
@@ -215,7 +259,6 @@ def get_supabase_user_by_email(email: str):
 
     Returns None if not found.
     """
-    # Try filtered API call first (efficient)
     filtered_users = _gotrue_admin_list_users_filtered(email)
     if filtered_users is not None:
         for user in filtered_users:
@@ -224,7 +267,6 @@ def get_supabase_user_by_email(email: str):
                 return user
         return None
 
-    # Fallback: iterate all users via SDK
     client = get_supabase_client()
     if not client:
         raise RuntimeError('Supabase client not available')
@@ -248,7 +290,6 @@ def get_supabase_user_by_phone(phone: str):
 
     Returns None if not found.
     """
-    # Try filtered API call first (efficient)
     filtered_users = _gotrue_admin_list_users_filtered(phone)
     if filtered_users is not None:
         for user in filtered_users:
@@ -257,7 +298,6 @@ def get_supabase_user_by_phone(phone: str):
                 return user
         return None
 
-    # Fallback: iterate all users via SDK
     client = get_supabase_client()
     if not client:
         raise RuntimeError('Supabase client not available')
