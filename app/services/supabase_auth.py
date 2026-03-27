@@ -97,14 +97,13 @@ def create_supabase_user(
         error_msg = str(e).lower()
         if 'already registered' in error_msg or 'already been registered' in error_msg:
             logger.info('Supabase user already exists — looking up by phone/email')
-            # Look up existing user so caller can link it
             existing = None
             if phone:
                 existing = get_supabase_user_by_phone(phone)
             if not existing and email and not email.endswith('.kolab.local'):
                 existing = get_supabase_user_by_email(email)
             if existing:
-                # Return None for password — caller must use stored password or reset it
+                # Return None for password — caller must reset it via generate_supabase_session
                 return existing, None
             logger.error('Could not find existing Supabase user after duplicate error')
         raise
@@ -131,10 +130,8 @@ def generate_supabase_session(
         Dict with access_token, refresh_token, expires_in, expires_at
         or None if session generation fails
     """
-    # Build a stable cache key from whatever identifier we have
     cache_key = supabase_user_id or email or phone or 'unknown'
 
-    # Return cached session if still fresh
     cached = _cached_session(cache_key)
     if cached:
         return cached
@@ -144,7 +141,6 @@ def generate_supabase_session(
         logger.warning('Anon client not available — cannot generate Supabase session')
         return None
 
-    # If no password is known, set a new one via admin API
     if not password:
         if not supabase_user_id:
             logger.error('Cannot generate session: no password and no supabase_user_id')
@@ -251,6 +247,13 @@ def _gotrue_admin_list_users_filtered(filter_value: str) -> Optional[list]:
         return None
 
 
+def _get_phone_from_user(user) -> Optional[str]:
+    """Safely extract phone from a user object or dict."""
+    if isinstance(user, dict):
+        return user.get('phone')
+    return getattr(user, 'phone', None)
+
+
 def get_supabase_user_by_email(email: str):
     """Look up a Supabase Auth user by email.
 
@@ -285,28 +288,42 @@ def get_supabase_user_by_email(email: str):
 def get_supabase_user_by_phone(phone: str):
     """Look up a Supabase Auth user by phone number.
 
-    Uses the GoTrue admin API ?filter= parameter for server-side filtering.
-    Falls back to iterating all users if the filtered request fails.
+    GoTrue stores phone numbers in E.164 format (e.g. +37125953807).
+    The ?filter= parameter does a text LIKE match — the '+' character can
+    cause the filter to return zero results. We therefore try two filter
+    values: the full E.164 string AND the digits-only variant.
+
+    Falls back to a full list_users() scan if both filtered requests fail
+    to find a match.
 
     Returns None if not found.
     """
-    filtered_users = _gotrue_admin_list_users_filtered(phone)
-    if filtered_users is not None:
-        for user in filtered_users:
-            user_phone = user.get('phone') if isinstance(user, dict) else getattr(user, 'phone', None)
-            if user_phone == phone:
-                return user
-        return None
+    # Normalise: ensure E.164 form and digits-only form for comparison
+    phone_e164 = phone if phone.startswith('+') else f'+{phone}'
+    phone_digits = phone_e164.lstrip('+')
 
+    # Try filtered requests with both variants
+    for filter_val in (phone_e164, phone_digits):
+        filtered_users = _gotrue_admin_list_users_filtered(filter_val)
+        if filtered_users is not None:
+            for user in filtered_users:
+                stored = _get_phone_from_user(user)
+                if stored and (stored == phone_e164 or stored.lstrip('+') == phone_digits):
+                    logger.info(f'Found Supabase user by phone filter ({filter_val})')
+                    return user
+
+    # Both filtered requests came back empty — do a full scan as last resort
+    logger.info('Phone filter returned no match, falling back to list_users() scan')
     client = get_supabase_client()
     if not client:
         raise RuntimeError('Supabase client not available')
 
     try:
-        logger.info('Falling back to list_users() for phone lookup')
         users = client.auth.admin.list_users()
         for user in users:
-            if hasattr(user, 'phone') and user.phone == phone:
+            stored = _get_phone_from_user(user)
+            if stored and (stored == phone_e164 or stored.lstrip('+') == phone_digits):
+                logger.info(f'Found Supabase user by phone in list_users scan')
                 return user
     except Exception as e:
         logger.error(f'Error looking up user by phone: {e}')
