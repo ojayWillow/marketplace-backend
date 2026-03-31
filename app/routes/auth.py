@@ -11,6 +11,7 @@ import secrets
 import string
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -45,6 +46,15 @@ def _ensure_supabase_user(user, phone=None, email=None):
         Tuple of (supabase_user_id, password_used) or (supabase_user_id, None)
         password_used is the password set on the Supabase user (needed for session generation)
     """
+    # Always refresh from DB first to clear any stale in-memory state.
+    # Without this, a previously committed supabase_user_id may appear as
+    # None in a reused SQLAlchemy session, causing a spurious UPDATE that
+    # hits the unique constraint.
+    try:
+        db.session.refresh(user)
+    except Exception:
+        pass  # If session is broken, the check below will catch it
+
     if user.supabase_user_id:
         return user.supabase_user_id, None
 
@@ -67,10 +77,38 @@ def _ensure_supabase_user(user, phone=None, email=None):
             existing = get_supabase_user_by_email(email)
 
         if existing:
-            user.supabase_user_id = str(existing.id)
-            db.session.commit()
+            existing_id = str(existing.id) if hasattr(existing, 'id') else str(existing.get('id', ''))
+
+            # Re-check after refresh: the id may already be stored on this user
+            if user.supabase_user_id == existing_id:
+                return existing_id, None
+
+            # Ensure no other local user already owns this Supabase UUID
+            conflict = User.query.filter(
+                User.supabase_user_id == existing_id,
+                User.id != user.id
+            ).first()
+            if conflict:
+                current_app.logger.error(
+                    f'Supabase user {existing_id} is already linked to local user '
+                    f'{conflict.id}; cannot link to user {user.id}'
+                )
+                # Return the id anyway — the session generator can still use it
+                return existing_id, None
+
+            user.supabase_user_id = existing_id
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                # Another request beat us to it — that's fine, the value is there
+                current_app.logger.warning(
+                    f'IntegrityError linking Supabase user {existing_id} to local '
+                    f'user {user.id} — already set by a concurrent request'
+                )
+                db.session.refresh(user)
             current_app.logger.info(
-                f'Linked existing Supabase user {existing.id} to local user {user.id}'
+                f'Linked existing Supabase user {existing_id} to local user {user.id}'
             )
             return user.supabase_user_id, None
 
@@ -87,10 +125,20 @@ def _ensure_supabase_user(user, phone=None, email=None):
             },
         )
 
-        user.supabase_user_id = str(supabase_user.id)
-        db.session.commit()
+        new_id = str(supabase_user.id) if hasattr(supabase_user, 'id') else str(supabase_user.get('id', ''))
+
+        user.supabase_user_id = new_id
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            current_app.logger.warning(
+                f'IntegrityError storing new Supabase user {new_id} for local '
+                f'user {user.id} — already set by a concurrent request'
+            )
+            db.session.refresh(user)
         current_app.logger.info(
-            f'Created Supabase user {supabase_user.id} for local user {user.id}'
+            f'Created Supabase user {new_id} for local user {user.id}'
         )
         return user.supabase_user_id, password_used
 
