@@ -13,6 +13,7 @@ import os
 import secrets
 import threading
 import time
+import urllib.parse
 from typing import Optional, Tuple
 import requests as http_requests
 from app.services.supabase_client import get_supabase_client, get_supabase_anon_client
@@ -216,6 +217,9 @@ def _gotrue_admin_list_users_filtered(filter_value: str) -> Optional[list]:
     does a LIKE match on email, phone, and user metadata. This avoids
     fetching all users just to find one.
 
+    The '+' in E.164 phone numbers must be percent-encoded so it is not
+    treated as a space by the HTTP layer.
+
     Returns a list of user dicts, or None if the request fails.
     """
     supabase_url = os.getenv('SUPABASE_URL')
@@ -223,11 +227,14 @@ def _gotrue_admin_list_users_filtered(filter_value: str) -> Optional[list]:
     if not supabase_url or not service_key:
         return None
 
+    # Percent-encode the filter value so '+' in E.164 numbers is preserved
+    encoded_filter = urllib.parse.quote(filter_value, safe='')
+
     try:
         url = f'{supabase_url.rstrip("/")}/auth/v1/admin/users'
         resp = http_requests.get(
             url,
-            params={'filter': filter_value, 'page': 1, 'per_page': 50},
+            params={'filter': encoded_filter, 'page': 1, 'per_page': 50},
             headers={
                 'Authorization': f'Bearer {service_key}',
                 'apikey': service_key,
@@ -276,7 +283,7 @@ def get_supabase_user_by_email(email: str):
 
     try:
         logger.info('Falling back to list_users() for email lookup')
-        users = client.auth.admin.list_users()
+        users = client.auth.admin.list_users(per_page=1000)
         for user in users:
             if hasattr(user, 'email') and user.email == email:
                 return user
@@ -289,12 +296,13 @@ def get_supabase_user_by_phone(phone: str):
     """Look up a Supabase Auth user by phone number.
 
     GoTrue stores phone numbers in E.164 format (e.g. +37125953807).
-    The ?filter= parameter does a text LIKE match — the '+' character can
-    cause the filter to return zero results. We therefore try two filter
-    values: the full E.164 string AND the digits-only variant.
+    The ?filter= parameter does a text LIKE match — the '+' character is
+    percent-encoded before passing to the HTTP layer so it is not silently
+    converted to a space.
 
     Falls back to a full list_users() scan if both filtered requests fail
-    to find a match.
+    to find a match. The scan uses per_page=1000 to avoid silently missing
+    users beyond the default 50-user first page.
 
     Returns None if not found.
     """
@@ -319,7 +327,7 @@ def get_supabase_user_by_phone(phone: str):
         raise RuntimeError('Supabase client not available')
 
     try:
-        users = client.auth.admin.list_users()
+        users = client.auth.admin.list_users(per_page=1000)
         for user in users:
             stored = _get_phone_from_user(user)
             if stored and (stored == phone_e164 or stored.lstrip('+') == phone_digits):

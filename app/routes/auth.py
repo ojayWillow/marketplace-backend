@@ -43,8 +43,9 @@ def _ensure_supabase_user(user, phone=None, email=None):
         email: Email to register with (including placeholder emails)
 
     Returns:
-        Tuple of (supabase_user_id, password_used) or (supabase_user_id, None)
+        Tuple of (supabase_user_id, password_used, conflict_email)
         password_used is the password set on the Supabase user (needed for session generation)
+        conflict_email is the email of the conflicting Supabase user (if any), else None
     """
     # Always refresh from DB first to clear any stale in-memory state.
     # Without this, a previously committed supabase_user_id may appear as
@@ -56,7 +57,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
         pass  # If session is broken, the check below will catch it
 
     if user.supabase_user_id:
-        return user.supabase_user_id, None
+        return user.supabase_user_id, None, None
 
     try:
         from app.services.supabase_auth import (
@@ -66,7 +67,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
         )
     except (ImportError, RuntimeError):
         current_app.logger.debug('Supabase not available, skipping user creation')
-        return None, None
+        return None, None, None
 
     try:
         # Check if Supabase user already exists (e.g., created via another flow)
@@ -81,7 +82,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
 
             # Re-check after refresh: the id may already be stored on this user
             if user.supabase_user_id == existing_id:
-                return existing_id, None
+                return existing_id, None, None
 
             # Ensure no other local user already owns this Supabase UUID
             conflict = User.query.filter(
@@ -93,8 +94,10 @@ def _ensure_supabase_user(user, phone=None, email=None):
                     f'Supabase user {existing_id} is already linked to local user '
                     f'{conflict.id}; cannot link to user {user.id}'
                 )
-                # Return the id anyway — the session generator can still use it
-                return existing_id, None
+                # Return the existing_id plus the conflict user's email so the
+                # session generator can sign in via the correct Supabase account.
+                conflict_email = conflict.email if conflict.email and not conflict.email.endswith('.kolab.local') else None
+                return existing_id, None, conflict_email
 
             user.supabase_user_id = existing_id
             try:
@@ -110,7 +113,7 @@ def _ensure_supabase_user(user, phone=None, email=None):
             current_app.logger.info(
                 f'Linked existing Supabase user {existing_id} to local user {user.id}'
             )
-            return user.supabase_user_id, None
+            return user.supabase_user_id, None, None
 
         # Create new Supabase Auth user
         # ALWAYS include email (even placeholder) so sign_in_with_password works
@@ -140,31 +143,48 @@ def _ensure_supabase_user(user, phone=None, email=None):
         current_app.logger.info(
             f'Created Supabase user {new_id} for local user {user.id}'
         )
-        return user.supabase_user_id, password_used
+        return user.supabase_user_id, password_used, None
 
     except Exception as e:
         current_app.logger.error(
             f'Failed to create Supabase user for local user {user.id}: {e}'
         )
         current_app.logger.debug(traceback.format_exc())
-        return None, None
+        return None, None, None
 
 
-def _get_supabase_session(user, phone=None, email=None, password=None):
+def _get_supabase_session(user, phone=None, email=None, password=None, conflict_email=None):
     """Generate a Supabase session for a user.
 
     Attempts to generate a Supabase session using the given credentials.
     Always passes email (even placeholder) for reliable sign-in.
+
+    If conflict_email is provided, it means this user's Supabase account is
+    shared with another local user (stale link). We sign in via the
+    conflict_email so the session is generated against the correct Supabase
+    account rather than failing silently.
+
     Returns None if Supabase is not available or session generation fails.
     """
     supabase_user_id = user.supabase_user_id
     if not supabase_user_id:
         return None
 
+    # If the Supabase account is owned by a different local user, sign in
+    # using that account's email (or fall back to phone). This avoids the
+    # 'session generation failed' error caused by passing an email that
+    # doesn't match the Supabase account.
+    sign_in_email = conflict_email or email or user.email
+
+    # Don't use a .kolab.local placeholder as the sign-in credential —
+    # it won't exist as a Supabase email. Fall back to phone in that case.
+    if sign_in_email and sign_in_email.endswith('.kolab.local'):
+        sign_in_email = None
+
     try:
         from app.services.supabase_auth import generate_supabase_session
         return generate_supabase_session(
-            email=email or user.email,
+            email=sign_in_email,
             phone=phone or user.phone,
             password=password,
             supabase_user_id=supabase_user_id,
@@ -284,13 +304,14 @@ def phone_verify():
         # --- Create/link Supabase Auth user ---
         # Always pass email (even placeholder) so Supabase user has an email
         # for reliable sign_in_with_password
-        supabase_user_id, password_used = _ensure_supabase_user(
+        supabase_user_id, password_used, conflict_email = _ensure_supabase_user(
             user, phone=normalized_phone, email=user.email
         )
         
         # --- Generate Supabase session ---
         supabase_session = _get_supabase_session(
-            user, phone=normalized_phone, email=user.email, password=password_used
+            user, phone=normalized_phone, email=user.email,
+            password=password_used, conflict_email=conflict_email
         )
         
         response_data = _build_session_response(
@@ -366,7 +387,7 @@ def phone_link(current_user_id):
         db.session.commit()
         
         # Ensure Supabase user exists with this phone
-        supabase_user_id, password_used = _ensure_supabase_user(
+        supabase_user_id, password_used, conflict_email = _ensure_supabase_user(
             user, phone=normalized_phone, email=user.email
         )
         
@@ -374,7 +395,8 @@ def phone_link(current_user_id):
         
         # Generate fresh Supabase session
         supabase_session = _get_supabase_session(
-            user, phone=normalized_phone, email=user.email, password=password_used
+            user, phone=normalized_phone, email=user.email,
+            password=password_used, conflict_email=conflict_email
         )
         
         response_data = _build_session_response(
@@ -513,13 +535,14 @@ def complete_registration(current_user_id):
         db.session.commit()
         
         # Ensure Supabase user is created/linked (email may have been set now)
-        supabase_user_id, password_used = _ensure_supabase_user(
+        supabase_user_id, password_used, conflict_email = _ensure_supabase_user(
             user, phone=user.phone, email=user.email
         )
         
         # Generate fresh Supabase session with updated user data
         supabase_session = _get_supabase_session(
-            user, phone=user.phone, email=user.email, password=password_used
+            user, phone=user.phone, email=user.email,
+            password=password_used, conflict_email=conflict_email
         )
         
         response_data = _build_session_response(
