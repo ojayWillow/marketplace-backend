@@ -473,6 +473,9 @@ def update_task(current_user_id, task_id):
         if 'images' in data:
             task.images = data['images']
         
+        if 'images' in data:
+            task.images = data['images']
+        
         task.updated_at = datetime.utcnow()
         db.session.commit()
         
